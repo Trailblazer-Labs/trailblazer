@@ -89,7 +89,8 @@
       {
         "provider": "github",
         "owner": "Trailblazer-Labs",
-        "repo": "trailblazer"
+        "repo": "trailblazer",
+        "releaseType": "release"
       }
     ]
   }

@@ -47,7 +47,9 @@ jobs:
           python-version: '3.11'
 
       - name: Install dependencies
-        run: npm ci
+        # --foreground-scripts streams native compile output live so a slow build
+        # doesn't look like a hang. --no-audit --no-fund trims unrelated noise.
+        run: npm ci --foreground-scripts --no-audit --no-fund
 
       - name: Set release version
         shell: bash

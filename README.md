@@ -29,7 +29,7 @@ and merge — all from one window.
 
 <!-- TODO: hero screenshot of the Features tab with chat + changes panel -->
 <p align="center">
-  <img src="docs/screenshots/hero.png" width="900" alt="Trailblazer feature view" />
+  <img src="docs/chat.png" width="900" alt="Trailblazer feature chat" />
 </p>
 
 ## Why
@@ -52,7 +52,7 @@ branch in each repo and stitches them into a shared workspace the agent operates
 
 <!-- TODO: screenshot of New Feature modal -->
 <p align="center">
-  <img src="docs/screenshots/new-feature.png" width="720" alt="New feature modal" />
+  <img src="docs/newfeature.png" width="720" alt="New feature modal" />
 </p>
 
 ### Agent chat with sessions
@@ -61,11 +61,6 @@ The feature view is a chat. Each turn streams the agent's reasoning, tool calls 
 Bash, Grep…), and file changes in real time. Run multiple **sessions** in parallel for the
 same feature — each one keeps its own conversation history, its own checkpoint baseline,
 and resumes via the engine's native session id (`claude --resume`, `codex exec --resume`).
-
-<!-- TODO: screenshot of chat with activity stream + changes panel + sessions sidebar -->
-<p align="center">
-  <img src="docs/screenshots/chat.png" width="900" alt="Feature chat" />
-</p>
 
 ### Issues to PRs
 
@@ -76,7 +71,10 @@ inline, and a PR opens with `Closes #N` wired up.
 
 <!-- TODO: screenshot of issues table + Add Issue modal -->
 <p align="center">
-  <img src="docs/screenshots/issues.png" width="900" alt="Issues view" />
+  <img src="docs/issues.png" width="900" alt="Issues view" />
+</p>
+<p align="center">
+  <img src="docs/newissue.png" width="720" alt="New issue modal with agent-expanded body" />
 </p>
 
 ### Inline diff review
@@ -86,7 +84,7 @@ gutters. Click any changed file in the Changes panel or PR Review modal to see i
 
 <!-- TODO: screenshot of diff modal -->
 <p align="center">
-  <img src="docs/screenshots/diff.png" width="900" alt="Diff viewer" />
+  <img src="docs/diff.png" width="900" alt="Diff viewer" />
 </p>
 
 ### One-click PRs
@@ -104,6 +102,10 @@ Bring your own setup:
   chat lets you choose **per-message**.
 - Models are curated per engine and probed via the CLI's interactive `/model` command so
   the list reflects what your account can actually access. Custom model IDs supported.
+
+<p align="center">
+  <img src="docs/Settings.png" width="720" alt="Settings with engine + model pickers" />
+</p>
 
 ### Quality-of-life
 
