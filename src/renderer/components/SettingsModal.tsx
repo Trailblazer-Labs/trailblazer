@@ -4,29 +4,34 @@ import { Modal } from './NewIssueModal'
 import EnginePicker from './EnginePicker'
 import { mergedModels } from '@shared/models'
 import type { ModelUseCase } from '@shared/models'
-import type { AppConfig, Engine, EngineDetection, Project, Repo } from '@shared/types'
+import type { AppConfig, Engine, EngineDetection, UpdateStatus } from '@shared/types'
 
 export default function SettingsModal({ onClose }: { onClose: () => void }) {
   const [detect, setDetect] = useState<EngineDetection | null>(null)
   const [engine, setEngine] = useState<Engine | null>(null)
   const [original, setOriginal] = useState<Engine | null>(null)
   const [config, setConfig] = useState<AppConfig | null>(null)
+  const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   async function reload() {
-    const [d, cfg] = await Promise.all([
+    const [d, cfg, updater] = await Promise.all([
       window.api.config.detectEngines(),
-      window.api.config.get()
+      window.api.config.get(),
+      window.api.updater.getStatus()
     ])
     setDetect(d)
     setConfig(cfg)
+    setUpdateStatus(updater)
     setEngine(cfg.engine)
     setOriginal(cfg.engine)
   }
 
   useEffect(() => {
     reload()
+    const unsubscribe = window.api.updater.onEvent(setUpdateStatus)
+    return unsubscribe
   }, [])
 
   async function save() {
@@ -97,6 +102,10 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
 
         {engine && <ModelsSection engine={engine} />}
 
+        {updateStatus && (
+          <UpdaterSection status={updateStatus} onStatus={setUpdateStatus} />
+        )}
+
         {error && <div className="text-red-400 text-xs">{error}</div>}
 
         <div className="flex justify-end gap-2 pt-1">
@@ -113,6 +122,93 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
 }
 
 const CUSTOM_SENTINEL = '__custom__'
+
+function UpdaterSection({
+  status,
+  onStatus
+}: {
+  status: UpdateStatus
+  onStatus: (status: UpdateStatus) => void
+}) {
+  const [busy, setBusy] = useState(false)
+  const isChecking = status.state === 'checking'
+  const isDownloading = status.state === 'downloading'
+  const isDisabled = status.state === 'disabled'
+
+  async function run(action: () => Promise<UpdateStatus>) {
+    setBusy(true)
+    try {
+      onStatus(await action())
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const label =
+    status.state === 'available' && status.availableVersion
+      ? `Version ${status.availableVersion} is available.`
+      : status.state === 'downloaded' && status.downloadedVersion
+        ? `Version ${status.downloadedVersion} is ready to install.`
+        : status.state === 'not-available'
+          ? 'Trailblazer is up to date.'
+          : status.state === 'checking'
+            ? 'Checking for updates...'
+            : status.state === 'downloading'
+              ? `Downloading update${status.percent !== null ? ` ${status.percent}%` : ''}.`
+              : status.state === 'disabled'
+                ? status.message ?? 'Updater unavailable.'
+                : 'Automatic update checks are enabled.'
+
+  return (
+    <section className="space-y-2">
+      <div className="text-xs uppercase tracking-wider text-muted">Updates</div>
+      <div className="rounded-md border border-border bg-bg p-3">
+        <div className="flex items-center justify-between gap-3">
+          <div className="min-w-0">
+            <div className="text-sm">Trailblazer {status.currentVersion}</div>
+            <div className="text-xs text-muted">{label}</div>
+            {status.state === 'error' && status.message && (
+              <div className="mt-1 text-[10px] text-red-400">{status.message}</div>
+            )}
+          </div>
+          <div className="flex shrink-0 items-center gap-2">
+            {status.state === 'available' && (
+              <Button
+                onClick={() => run(() => window.api.updater.download())}
+                disabled={busy}
+              >
+                Download
+              </Button>
+            )}
+            {status.state === 'downloaded' && (
+              <Button
+                variant="primary"
+                onClick={() => run(() => window.api.updater.quitAndInstall())}
+                disabled={busy}
+              >
+                Restart
+              </Button>
+            )}
+            <Button
+              onClick={() => run(() => window.api.updater.check())}
+              disabled={busy || isChecking || isDownloading || isDisabled}
+            >
+              {isChecking ? 'Checking...' : 'Check'}
+            </Button>
+          </div>
+        </div>
+        {isDownloading && status.percent !== null && (
+          <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-panel">
+            <div
+              className="h-full bg-accent transition-all"
+              style={{ width: `${Math.max(0, Math.min(100, status.percent))}%` }}
+            />
+          </div>
+        )}
+      </div>
+    </section>
+  )
+}
 
 function ModelsSection({ engine }: { engine: Engine }) {
   const [discovered, setDiscovered] = useState<Array<{ id: string; label?: string }> | null>(null)

@@ -8,6 +8,12 @@ import { expandIssue, expandBus } from '../services/issueExpander'
 import { detectEngines, getEngine, setEngine } from '../services/engine'
 import { getModel, setModel } from '../services/modelPrefs'
 import {
+  checkForUpdates,
+  downloadUpdate,
+  getUpdateStatus,
+  quitAndInstall
+} from '../services/updater'
+import {
   getCachedDiscoveredModels,
   refreshDiscoveredModels
 } from '../services/modelDiscovery'
@@ -105,6 +111,10 @@ export function registerIpc(win: BrowserWindow) {
   ipcMain.handle(IPC.configDiscoverModels, (_e, engine: Engine) =>
     refreshDiscoveredModels(engine)
   )
+  ipcMain.handle(IPC.updaterGetStatus, () => getUpdateStatus())
+  ipcMain.handle(IPC.updaterCheck, () => checkForUpdates())
+  ipcMain.handle(IPC.updaterDownload, () => downloadUpdate())
+  ipcMain.handle(IPC.updaterQuitAndInstall, () => quitAndInstall())
 
   // ── github ───────────────────────────────────────────
   ipcMain.handle(IPC.githubValidatePat, (_e, token: string) => gh.validatePat(token))
