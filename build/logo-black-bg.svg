@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="outer" x1="512" y1="48" x2="512" y2="976" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFBE6B"/>
+      <stop offset="0.55" stop-color="#F2733A"/>
+      <stop offset="1" stop-color="#C2421A"/>
+    </linearGradient>
+    <linearGradient id="inner" x1="512" y1="352" x2="512" y2="896" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFEFB8"/>
+      <stop offset="0.6" stop-color="#FFB04A"/>
+      <stop offset="1" stop-color="#F26A1F"/>
+    </linearGradient>
+    <radialGradient id="core" cx="512" cy="768" r="192" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.95"/>
+      <stop offset="1" stop-color="#FFE9A8" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <rect width="1024" height="1024" fill="#000000"/>
+  <path
+    fill="url(#outer)"
+    d="M512 48
+       C 416 192, 320 272, 288 384
+       C 256 480, 288 544, 320 576
+       C 256 592, 176 672, 176 768
+       C 176 912, 320 976, 512 976
+       C 704 976, 848 912, 848 768
+       C 848 656, 752 560, 656 512
+       C 704 416, 672 304, 576 192
+       C 560 272, 528 304, 496 304
+       C 448 304, 464 192, 512 48 Z"/>
+  <path
+    fill="url(#inner)"
+    d="M512 352
+       C 432 448, 368 528, 368 640
+       C 368 800, 432 896, 512 896
+       C 592 896, 656 800, 656 672
+       C 656 576, 592 528, 560 448
+       C 550 512, 534 538, 512 538
+       C 487 538, 493 448, 512 352 Z"/>
+  <ellipse cx="512" cy="768" rx="134" ry="96" fill="url(#core)"/>
+</svg>
