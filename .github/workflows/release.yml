@@ -60,15 +60,34 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
+      # Pass signing env vars only when they're actually configured. An empty CSC_LINK
+      # makes electron-builder treat "" as a file path and fail. Values written via
+      # GITHUB_ENV are auto-masked by GitHub Actions so secrets stay out of logs.
+      - name: Configure code signing
+        shell: bash
+        env:
+          CSC_LINK_VALUE: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD_VALUE: ${{ secrets.CSC_KEY_PASSWORD }}
+          APPLE_ID_VALUE: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD_VALUE: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID_VALUE: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          if [ -n "$CSC_LINK_VALUE" ]; then
+            echo "CSC_LINK=$CSC_LINK_VALUE" >> "$GITHUB_ENV"
+            echo "CSC_KEY_PASSWORD=$CSC_KEY_PASSWORD_VALUE" >> "$GITHUB_ENV"
+            echo "APPLE_ID=$APPLE_ID_VALUE" >> "$GITHUB_ENV"
+            echo "APPLE_APP_SPECIFIC_PASSWORD=$APPLE_APP_SPECIFIC_PASSWORD_VALUE" >> "$GITHUB_ENV"
+            echo "APPLE_TEAM_ID=$APPLE_TEAM_ID_VALUE" >> "$GITHUB_ENV"
+            echo "::notice::Code signing enabled"
+          else
+            echo "CSC_IDENTITY_AUTO_DISCOVERY=false" >> "$GITHUB_ENV"
+            echo "::warning::Code signing skipped (CSC_LINK secret not set). Unsigned builds will trigger Gatekeeper warnings on macOS."
+          fi
+
       - name: Publish ${{ matrix.platform.name }} release
         run: npm run ${{ matrix.platform.script }}
         env:
           GH_TOKEN: ${{ github.token }}
-          CSC_LINK: ${{ secrets.CSC_LINK }}
-          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
 
       # Sanity check: the README download links expect exactly these filenames,
       # produced by the `artifactName` template in package.json. Fail loudly here
