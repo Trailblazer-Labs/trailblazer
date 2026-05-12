@@ -1,4 +1,5 @@
 import { execFile, spawn } from 'node:child_process'
+import { homedir } from 'node:os'
 import { promisify } from 'node:util'
 import { kvGetSecret, kvSetSecret } from './db'
 import { isAutoModel } from '@shared/models'
@@ -9,6 +10,19 @@ const execFileP = promisify(execFile)
 export const KEY_ENGINE = 'engine.kind'
 const KEY_CLAUDE_PATH = 'engine.claude.path'
 const KEY_CODEX_PATH = 'engine.codex.path'
+const EXTRA_CLI_PATHS = [
+  `${homedir()}/.local/bin`,
+  `${homedir()}/.npm-global/bin`,
+  `${homedir()}/.yarn/bin`,
+  `${homedir()}/.bun/bin`,
+  '/opt/homebrew/bin',
+  '/opt/homebrew/sbin',
+  '/usr/local/bin',
+  '/usr/bin',
+  '/bin',
+  '/usr/sbin',
+  '/sbin'
+]
 
 export function getEngine(): Engine | null {
   const v = kvGetSecret(KEY_ENGINE)
@@ -27,27 +41,55 @@ export function setEngine(args: { engine: Engine; path?: string }) {
   }
 }
 
+function mergedPath(...parts: Array<string | undefined>): string {
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (const part of parts) {
+    for (const entry of part?.split(':') ?? []) {
+      if (!entry || seen.has(entry)) continue
+      seen.add(entry)
+      out.push(entry)
+    }
+  }
+  return out.join(':')
+}
+
+function cliPath(): string {
+  return mergedPath(process.env.PATH, EXTRA_CLI_PATHS.join(':'))
+}
+
+function cliEnv(extra?: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  return { ...process.env, ...extra, PATH: cliPath() }
+}
+
 async function detect(bin: string): Promise<{ found: boolean; path?: string; version?: string }> {
   const candidates: string[] = []
   try {
-    const which = await execFileP('which', [bin])
+    const which = await execFileP('which', [bin], { env: cliEnv() })
     const p = which.stdout.trim()
     if (p) candidates.push(p)
   } catch {
     // ignore
   }
-  candidates.push(`/opt/homebrew/bin/${bin}`, `/usr/local/bin/${bin}`)
+  candidates.push(
+    `${homedir()}/.local/bin/${bin}`,
+    `${homedir()}/.npm-global/bin/${bin}`,
+    `${homedir()}/.yarn/bin/${bin}`,
+    `${homedir()}/.bun/bin/${bin}`,
+    `/opt/homebrew/bin/${bin}`,
+    `/usr/local/bin/${bin}`
+  )
 
-  for (const p of candidates) {
+  for (const p of [...new Set(candidates)]) {
     try {
       // Use a subcommand that actually loads the native binary — `--help` of a real
       // subcommand will fail with ENOENT if the platform-specific binary is missing,
       // unlike top-level `--version` which is often handled by an npm wrapper.
       const probe = bin === 'codex' ? ['exec', '--help'] : ['--version']
-      await execFileP(p, probe)
+      await execFileP(p, probe, { env: cliEnv() })
       let version: string | undefined
       try {
-        const v = await execFileP(p, ['--version'])
+        const v = await execFileP(p, ['--version'], { env: cliEnv() })
         version = v.stdout.trim().split('\n')[0]
       } catch {
         // ignore
@@ -114,7 +156,7 @@ export function spawnAgent(
   const args = buildAgentArgs(engine, prompt, mode, opts)
   const proc = spawn(bin, args, {
     cwd,
-    env: { ...process.env, NO_COLOR: '1' },
+    env: cliEnv({ NO_COLOR: '1' }),
     stdio: ['ignore', 'pipe', 'pipe']
   })
   let stdout = ''

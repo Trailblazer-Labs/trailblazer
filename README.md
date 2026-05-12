@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="build/icon.svg" width="120" alt="Trailblazer" />
+  <img src="build/logo.svg" width="120" alt="Trailblazer" />
   <h1>Trailblazer</h1>
   <p><strong>Multi-repo agent orchestrator for Claude Code and Codex.</strong></p>
   <p>
