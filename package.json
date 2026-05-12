@@ -1,0 +1,83 @@
+{
+  "name": "trailblazer",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Multi-repo issue→PR orchestrator",
+  "main": "out/main/index.js",
+  "author": "Trailblazer",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "start": "electron-vite preview",
+    "postinstall": "electron-builder install-app-deps",
+    "gen:icon": "node scripts/generate-icon.mjs",
+    "typecheck:node": "tsc --noEmit -p tsconfig.node.json",
+    "typecheck:web": "tsc --noEmit -p tsconfig.web.json",
+    "typecheck": "npm run typecheck:node && npm run typecheck:web",
+    "package:mac": "electron-vite build && electron-builder --mac --arm64 --x64",
+    "package:win": "electron-vite build && electron-builder --win --x64"
+  },
+  "dependencies": {
+    "@fontsource-variable/space-grotesk": "^5.2.10",
+    "@octokit/rest": "^20.1.2",
+    "@tanstack/query-sync-storage-persister": "^5.100.10",
+    "@tanstack/react-query-persist-client": "^5.100.10",
+    "@types/react-syntax-highlighter": "^15.5.13",
+    "better-sqlite3": "^11.10.0",
+    "node-pty": "1.1.0-beta34",
+    "react-markdown": "^10.1.0",
+    "react-syntax-highlighter": "^16.1.1",
+    "remark-gfm": "^4.0.1",
+    "simple-git": "^3.27.0"
+  },
+  "devDependencies": {
+    "@resvg/resvg-js": "^2.6.2",
+    "@tanstack/react-query": "^5.59.0",
+    "@types/better-sqlite3": "^7.6.11",
+    "@types/node": "^22.7.4",
+    "@types/react": "^18.3.11",
+    "@types/react-dom": "^18.3.0",
+    "@vitejs/plugin-react": "^4.3.2",
+    "autoprefixer": "^10.4.20",
+    "class-variance-authority": "^0.7.0",
+    "clsx": "^2.1.1",
+    "electron": "^32.1.2",
+    "electron-builder": "^25.0.5",
+    "electron-vite": "^2.3.0",
+    "lucide-react": "^0.451.0",
+    "monaco-editor": "^0.52.0",
+    "postcss": "^8.4.47",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-monaco-editor": "^0.56.2",
+    "tailwind-merge": "^2.5.3",
+    "tailwindcss": "^3.4.13",
+    "typescript": "^5.6.2",
+    "vite": "^5.4.8",
+    "zustand": "^5.0.0"
+  },
+  "build": {
+    "appId": "app.trailblazer.desktop",
+    "productName": "Trailblazer",
+    "files": [
+      "out/**/*",
+      "package.json"
+    ],
+    "directories": {
+      "buildResources": "build"
+    },
+    "mac": {
+      "category": "public.app-category.developer-tools",
+      "target": [
+        "dmg"
+      ],
+      "icon": "build/icon.icns"
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ],
+      "icon": "build/icon.ico"
+    }
+  }
+}
