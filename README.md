@@ -3,6 +3,10 @@
   <h1>Trailblazer</h1>
   <p><strong>Multi-repo agent orchestrator for Claude Code and Codex.</strong></p>
   <p>
+    <img src="https://img.shields.io/badge/status-preview-orange" alt="Preview" />
+    <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows-blue" alt="Platforms" />
+  </p>
+  <p>
     <a href="#download">Download</a> ·
     <a href="#quick-start">Quick Start</a> ·
     <a href="#features">Features</a> ·
@@ -10,13 +14,18 @@
   </p>
 </div>
 
-<!-- TODO: badges -->
-<!--
-  ![Build](https://img.shields.io/github/actions/workflow/status/<owner>/trailblazer/ci.yml)
-  ![Release](https://img.shields.io/github/v/release/<owner>/trailblazer)
-  ![License](https://img.shields.io/github/license/<owner>/trailblazer)
-  ![Platforms](https://img.shields.io/badge/platform-macOS%20%7C%20Windows-orange)
--->
+> [!IMPORTANT]
+> **Trailblazer is in preview.** Builds are currently **unsigned** while signing certificates are being set up, so macOS and Windows will block them on first launch. One-time bypass per platform:
+>
+> **macOS** — after dragging `Trailblazer.app` to Applications, run once in Terminal:
+> ```bash
+> xattr -dr com.apple.quarantine /Applications/Trailblazer.app
+> ```
+> Then open the app normally. (Skipping this gives a "Trailblazer is damaged" error — it's not, it's just unsigned.)
+>
+> **Windows** — SmartScreen will warn on the first launch. Click **More info** → **Run anyway**.
+>
+> Expect a few rough edges. Bug reports and PRs welcome.
 
 ---
 
