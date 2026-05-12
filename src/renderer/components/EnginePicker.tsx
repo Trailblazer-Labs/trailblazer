@@ -1,4 +1,3 @@
-import { FireLogo } from './FireLogo'
 import type { Engine, EngineDetection } from '@shared/types'
 
 export default function EnginePicker({
@@ -21,7 +20,7 @@ export default function EnginePicker({
         active={selected === 'claude'}
         onClick={() => detect?.claude.found && onSelect('claude')}
       >
-        <FireLogo size={26} />
+        <ClaudeMark />
       </Card>
       <Card
         title="Codex CLI"
@@ -90,16 +89,36 @@ function Card({
   )
 }
 
+/**
+ * Anthropic / Claude mark — eight-pointed sparkle, simplified from the official wordmark.
+ * Kept abstract enough to avoid being a brand-asset infringement; recognisable enough that
+ * users associate it with Claude.
+ */
+function ClaudeMark() {
+  return (
+    <div className="w-7 h-7 rounded-md bg-[#0f0d0c] border border-border flex items-center justify-center">
+      <svg width="18" height="18" viewBox="0 0 32 32" fill="none">
+        <path
+          d="M16 2 L17.6 13.2 L28 11 L18.4 16 L28 21 L17.6 18.8 L16 30 L14.4 18.8 L4 21 L13.6 16 L4 11 L14.4 13.2 Z"
+          fill="#D97757"
+        />
+      </svg>
+    </div>
+  )
+}
+
+/**
+ * OpenAI / Codex mark — the recognisable knot pattern in a single stroke.
+ */
 function CodexMark() {
   return (
     <div className="w-7 h-7 rounded-md bg-[#0d0d0d] border border-border flex items-center justify-center">
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
-        <path
-          d="M12 2 L20 7 V17 L12 22 L4 17 V7 Z"
-          stroke="currentColor"
-          strokeWidth="1.6"
-          strokeLinejoin="round"
-        />
+      <svg width="18" height="18" viewBox="0 0 32 32" fill="none">
+        <g stroke="#10A37F" strokeWidth="1.8" fill="none" strokeLinecap="round">
+          <ellipse cx="16" cy="16" rx="11" ry="4.5" />
+          <ellipse cx="16" cy="16" rx="11" ry="4.5" transform="rotate(60 16 16)" />
+          <ellipse cx="16" cy="16" rx="11" ry="4.5" transform="rotate(120 16 16)" />
+        </g>
       </svg>
     </div>
   )

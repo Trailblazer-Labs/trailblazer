@@ -5,6 +5,7 @@ import { getDb } from './db'
 import { getEngine, spawnAgent } from './engine'
 import { createParser } from './agentParser'
 import { getModel } from './modelPrefs'
+import { AGENT_INSTRUCTIONS_FILE_PROMPT } from './agentInstructions'
 import type { ExpandEvent } from '@shared/types'
 
 export const expandBus = new EventEmitter()
@@ -100,6 +101,7 @@ function buildPrompt({
   return [
     `You are authoring a high-quality GitHub issue for the repository ${repoOwner}/${repoName}.`,
     'You are running inside the cloned repository — use Read, Grep, and Glob to ground the issue in the actual codebase.',
+    AGENT_INSTRUCTIONS_FILE_PROMPT,
     '',
     'Process:',
     '1. Read README/CONTRIBUTING/package.json (or equivalent) for project context.',
