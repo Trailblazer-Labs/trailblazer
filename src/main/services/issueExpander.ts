@@ -1,4 +1,5 @@
 import fs from 'node:fs'
+import simpleGit from 'simple-git'
 import { EventEmitter } from 'node:events'
 import { getDb } from './db'
 import { getEngine, spawnAgent } from './engine'
@@ -29,6 +30,15 @@ export async function expandIssue(args: {
   if (!engine) throw new Error('No engine configured — pick one in Settings')
 
   const cwd = fs.existsSync(repo.local_path) ? repo.local_path : process.cwd()
+
+  // Refresh remote refs so the agent grounds the issue in the latest code on origin.
+  // Best-effort — offline / auth hiccups shouldn't block the expansion.
+  try {
+    await simpleGit(cwd).fetch(['--all', '--prune'])
+  } catch {
+    // ignore
+  }
+
   const prompt = buildPrompt({
     brief: args.brief,
     repoOwner: repo.owner,
@@ -139,8 +149,10 @@ function extractClaudeResultText(stdout: string): string {
 function extractCodexResultText(stdout: string): string {
   const trimmed = stdout.trim()
   if (!trimmed) throw new Error('codex produced no output')
-  // codex exec --json emits JSONL events. The final agent message is what we want;
-  // walk events in order and keep the latest agent_message text (or accumulate deltas).
+  // codex exec --json emits JSONL events. The final agent message is what we want; in
+  // recent versions it arrives wrapped in `item.completed.item` with item_type/type
+  // === 'agent_message'. We walk all events and keep the LATEST message text — older
+  // intermediate narration is overwritten by the final structured response.
   let lastAgentMessage = ''
   let lastFinal = ''
   for (const line of trimmed.split('\n')) {
@@ -150,12 +162,34 @@ function extractCodexResultText(stdout: string): string {
       const ev = JSON.parse(s)
       const msg = ev?.msg ?? ev
       const t = msg?.type
+
       if (t === 'agent_message' && typeof msg.message === 'string') {
         lastAgentMessage = msg.message
       } else if (t === 'agent_message_delta' && typeof msg.delta === 'string') {
         lastAgentMessage += msg.delta
       } else if (t === 'task_complete' && typeof msg.last_agent_message === 'string') {
         lastFinal = msg.last_agent_message
+      } else if (
+        (t === 'item.completed' || t === 'item.finished') &&
+        msg.item &&
+        (msg.item.item_type === 'agent_message' ||
+          msg.item.item_type === 'assistant_message' ||
+          msg.item.item_type === 'message' ||
+          msg.item.type === 'agent_message' ||
+          msg.item.type === 'assistant_message' ||
+          msg.item.type === 'message')
+      ) {
+        const text: string =
+          (msg.item.text as string) ??
+          (msg.item.message as string) ??
+          (typeof msg.item.content === 'string'
+            ? (msg.item.content as string)
+            : Array.isArray(msg.item.content)
+              ? (msg.item.content as Array<{ text?: string }>)
+                  .map((c) => c?.text ?? '')
+                  .join('')
+              : '')
+        if (text && text.trim()) lastAgentMessage = text
       }
     } catch {
       // ignore non-JSON line

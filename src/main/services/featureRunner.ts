@@ -139,6 +139,27 @@ export async function sendPrompt(args: {
     ? getSession(args.sessionId) ?? ensureDefaultSession(args.featureId)
     : ensureDefaultSession(args.featureId)
 
+  // Persist the user's message immediately.
+  const userMessageId = insertMessage(args.featureId, session.id, 'user', args.prompt)
+  // Resume only if this session was previously used with the same engine.
+  const cliSessionId = session.engine === engine ? getSessionCli(session.id, engine) : null
+  const isFirstTurn = !cliSessionId
+
+  // On the very first turn of a session, refresh remote refs so the agent grounds its
+  // first response in current `origin/<base>`. Subsequent turns reuse the existing
+  // refs to keep the chat snappy. Fetch-only — never auto-merges.
+  if (isFirstTurn) {
+    await Promise.all(
+      repos.map(async (r) => {
+        try {
+          await simpleGit(r.worktreePath).fetch(['--all', '--prune'])
+        } catch {
+          // best-effort
+        }
+      })
+    )
+  }
+
   // Snapshot pre-run HEAD per repo so we can report what this turn changed.
   const heads = new Map<number, string>()
   for (const r of repos) {
@@ -149,12 +170,6 @@ export async function sendPrompt(args: {
       heads.set(r.repoId, '')
     }
   }
-
-  // Persist the user's message immediately.
-  const userMessageId = insertMessage(args.featureId, session.id, 'user', args.prompt)
-  // Resume only if this session was previously used with the same engine.
-  const cliSessionId = session.engine === engine ? getSessionCli(session.id, engine) : null
-  const isFirstTurn = !cliSessionId
   const prompt = isFirstTurn
     ? buildFirstTurnPrompt(feature.workspacePath, repos, args.prompt)
     : args.prompt
