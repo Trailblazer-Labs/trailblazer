@@ -30,7 +30,7 @@
   <!-- soft halo behind flame -->
   <ellipse cx="512" cy="760" rx="280" ry="220" fill="#F2733A" opacity="0.18" filter="url(#glow)"/>
 
-  <g transform="translate(0,0)">
+  <g transform="translate(512 512) scale(0.78) translate(-512 -512)">
     <!-- outer flame, scaled to canvas -->
     <path fill="url(#outer)"
       d="M512 48

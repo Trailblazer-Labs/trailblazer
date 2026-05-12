@@ -3,7 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Button } from '../components/ui'
 import { useApp } from '../stores/app'
 import { applyActivity } from '../components/ActivityList'
-import ActivityList from '../components/ActivityList'
+import ChatActivityStream from '../components/ChatActivityStream'
 import PRResultsModal from '../components/PRResultsModal'
 import FeatureSwitcher, { useFeatureSwitcherCollapsed } from '../components/FeatureSwitcher'
 import FeatureChangesPanel from '../components/FeatureChangesPanel'
@@ -298,9 +298,8 @@ export default function FeatureChatView({
                   </span>
                 )}
               </div>
-              <ActivityList
+              <ChatActivityStream
                 items={liveActivities}
-                engineLabel="Agent"
                 busy
                 emptyLabel={
                   runStartedAt && now - runStartedAt > 5000
@@ -471,9 +470,8 @@ function MessageBubble({ message }: { message: FeatureMessage }) {
       <div className="text-[10px] uppercase tracking-wider text-muted mb-1">Agent</div>
       {visibleActivities.length > 0 && (
         <div className="mb-2">
-          <ActivityList
+          <ChatActivityStream
             items={visibleActivities}
-            engineLabel="Agent"
             busy={false}
             emptyLabel="No activity recorded"
           />

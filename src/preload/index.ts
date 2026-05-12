@@ -147,6 +147,8 @@ const api = {
       repo: { owner: string; name: string; defaultBranch: string }
     ): Promise<{ id: number; localPath: string }> =>
       ipcRenderer.invoke(IPC.projectsAddRepo, projectId, repo),
+    addTrailblazer: (): Promise<Project> =>
+      ipcRenderer.invoke(IPC.projectsAddTrailblazer),
     removeRepo: (repoId: number) => ipcRenderer.invoke(IPC.projectsRemoveRepo, repoId),
     listRepos: (projectId: number): Promise<Repo[]> =>
       ipcRenderer.invoke(IPC.projectsListRepos, projectId)
