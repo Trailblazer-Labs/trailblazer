@@ -33,6 +33,21 @@ export interface Plan {
   updatedAt: string
 }
 
+export interface PlanMessage {
+  id: number
+  planId: number
+  role: 'user' | 'assistant' | 'system'
+  content: string
+  activities: AgentActivity[] | null
+  ts: string
+}
+
+export type PlanRunEvent =
+  | { type: 'start'; planId: number; engine: Engine; userMessageId: number }
+  | { type: 'activity'; planId: number; activity: AgentActivity }
+  | { type: 'done'; planId: number; assistantMessageId: number }
+  | { type: 'error'; planId: number; message: string }
+
 export interface FeatureRepo {
   featureId: number
   repoId: number

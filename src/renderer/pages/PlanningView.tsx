@@ -1,23 +1,18 @@
 import { type ReactNode, useEffect, useMemo, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Code2, Eye, FileText, Lightbulb, Plus, Send, Sparkles, Trash2 } from 'lucide-react'
+import { Code2, Eye, FileText, Lightbulb, Plus, Send, Sparkles, Square, Trash2 } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { Button, Input } from '../components/ui'
+import ActivityList, { applyActivity } from '../components/ActivityList'
 import { cn } from '../lib/cn'
-import type { Plan } from '@shared/types'
-
-type AssistantMessage = {
-  id: string
-  role: 'user' | 'assistant'
-  content: string
-}
+import type { AgentActivity, Engine, Plan, PlanMessage } from '@shared/types'
 
 const promptChips = [
-  'Find gaps',
-  'Create milestones',
-  'List risks',
-  'Write acceptance criteria'
+  'Find the gaps in this plan',
+  'Suggest implementation milestones',
+  'List risks and mitigations',
+  'Draft acceptance criteria'
 ]
 
 export default function PlanningView({ projectId }: { projectId: number }) {
@@ -28,14 +23,10 @@ export default function PlanningView({ projectId }: { projectId: number }) {
   const [documentMode, setDocumentMode] = useState<'edit' | 'preview'>('edit')
   const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved'>('idle')
   const [assistantInput, setAssistantInput] = useState('')
-  const [messages, setMessages] = useState<AssistantMessage[]>([
-    {
-      id: 'welcome',
-      role: 'assistant',
-      content:
-        'I can help shape this plan. Ask for scope, milestones, risks, acceptance criteria, or insert a planning template.'
-    }
-  ])
+  const [assistantRunning, setAssistantRunning] = useState(false)
+  const [assistantEngine, setAssistantEngine] = useState<Engine | null>(null)
+  const [assistantError, setAssistantError] = useState<string | null>(null)
+  const [liveActivities, setLiveActivities] = useState<AgentActivity[]>([])
 
   const { data: plans = [] } = useQuery({
     queryKey: ['plans', projectId],
@@ -46,6 +37,12 @@ export default function PlanningView({ projectId }: { projectId: number }) {
     () => plans.find((plan) => plan.id === activePlanId) ?? null,
     [activePlanId, plans]
   )
+
+  const { data: messages = [] } = useQuery<PlanMessage[]>({
+    queryKey: ['plan-messages', activePlanId],
+    enabled: activePlanId !== null,
+    queryFn: () => window.api.plans.listMessages(activePlanId!)
+  })
 
   useEffect(() => {
     if (plans.length === 0) {
@@ -106,17 +103,52 @@ export default function PlanningView({ projectId }: { projectId: number }) {
     setContent((current) => `${current.trimEnd()}\n\n${section}\n`)
   }
 
-  function sendAssistant(text = assistantInput) {
+  async function sendAssistant(text = assistantInput) {
     const prompt = text.trim()
-    if (!prompt) return
+    if (!prompt || !activePlan || assistantRunning) return
     setAssistantInput('')
-    const reply = buildAssistantReply(prompt, title, content)
-    setMessages((current) => [
-      ...current,
-      { id: crypto.randomUUID(), role: 'user', content: prompt },
-      { id: crypto.randomUUID(), role: 'assistant', content: reply }
-    ])
+    setAssistantError(null)
+    try {
+      await window.api.plans.sendPrompt({
+        planId: activePlan.id,
+        prompt,
+        planTitle: title,
+        planContent: content
+      })
+    } catch (e) {
+      setAssistantRunning(false)
+      setAssistantError(e instanceof Error ? e.message : String(e))
+    }
   }
+
+  async function cancelAssistant() {
+    if (!activePlan || !assistantRunning) return
+    await window.api.plans.cancelPrompt(activePlan.id)
+  }
+
+  useEffect(() => {
+    if (activePlanId === null) return
+    const unsub = window.api.plans.onEvent((evt) => {
+      if (evt.planId !== activePlanId) return
+      if (evt.type === 'start') {
+        setAssistantRunning(true)
+        setAssistantEngine(evt.engine)
+        setAssistantError(null)
+        setLiveActivities([])
+        void qc.invalidateQueries({ queryKey: ['plan-messages', activePlanId] })
+      } else if (evt.type === 'activity') {
+        setLiveActivities((current) => applyActivity(current, evt.activity))
+      } else if (evt.type === 'done') {
+        setAssistantRunning(false)
+        void qc.invalidateQueries({ queryKey: ['plan-messages', activePlanId] })
+      } else if (evt.type === 'error') {
+        setAssistantRunning(false)
+        setAssistantError(evt.message)
+        void qc.invalidateQueries({ queryKey: ['plan-messages', activePlanId] })
+      }
+    })
+    return unsub
+  }, [activePlanId, qc])
 
   return (
     <div className="h-full min-h-0 grid grid-cols-[260px_minmax(0,1fr)_320px] overflow-hidden bg-bg">
@@ -278,6 +310,7 @@ export default function PlanningView({ projectId }: { projectId: number }) {
               <button
                 key={chip}
                 onClick={() => sendAssistant(chip)}
+                disabled={!activePlan || assistantRunning}
                 className="no-drag rounded-md border border-border bg-panel px-2.5 py-2 text-xs text-muted hover:text-text hover:bg-[#1d1d1d] transition-colors"
               >
                 {chip}
@@ -294,19 +327,28 @@ export default function PlanningView({ projectId }: { projectId: number }) {
           </Button>
         </div>
         <div className="flex-1 min-h-0 overflow-y-auto p-3 space-y-3">
-          {messages.map((message) => (
-            <div
-              key={message.id}
-              className={cn(
-                'rounded-lg border px-3 py-2.5 text-xs leading-5',
-                message.role === 'assistant'
-                  ? 'bg-panel border-border text-text'
-                  : 'bg-[#1a1414] border-accent/30 text-[#f0d4c8]'
-              )}
-            >
-              {message.content}
+          {messages.length === 0 && !assistantRunning && (
+            <div className="rounded-lg border border-border bg-panel px-3 py-2.5 text-xs leading-5 text-muted">
+              Ask for scope, milestones, risks, acceptance criteria, or repo-specific planning
+              guidance. The agent can inspect all repos in this project.
             </div>
+          )}
+          {messages.map((message) => (
+            <PlanChatMessage key={message.id} message={message} />
           ))}
+          {(assistantRunning || liveActivities.length > 0) && (
+            <ActivityList
+              items={liveActivities}
+              emptyLabel="Reading project context..."
+              engineLabel={assistantEngine ?? 'Agent'}
+              busy={assistantRunning}
+            />
+          )}
+          {assistantError && (
+            <div className="rounded-lg border border-red-900/60 bg-red-950/20 px-3 py-2.5 text-xs leading-5 text-red-200">
+              {assistantError}
+            </div>
+          )}
         </div>
         <footer className="p-3 border-t border-border shrink-0">
           <div className="flex items-center gap-2">
@@ -318,18 +360,46 @@ export default function PlanningView({ projectId }: { projectId: number }) {
               }}
               placeholder="Ask about this plan..."
               className="h-9"
+              disabled={!activePlan || assistantRunning}
             />
             <button
-              onClick={() => sendAssistant()}
-              title="Send"
-              aria-label="Send"
+              onClick={() => {
+                if (assistantRunning) void cancelAssistant()
+                else void sendAssistant()
+              }}
+              title={assistantRunning ? 'Stop' : 'Send'}
+              aria-label={assistantRunning ? 'Stop' : 'Send'}
+              disabled={!activePlan}
               className="no-drag w-9 h-9 rounded-md border border-accent bg-accent text-black hover:brightness-110 flex items-center justify-center transition-colors shrink-0"
             >
-              <Send size={14} />
+              {assistantRunning ? <Square size={13} /> : <Send size={14} />}
             </button>
           </div>
         </footer>
       </aside>
+    </div>
+  )
+}
+
+function PlanChatMessage({ message }: { message: PlanMessage }) {
+  const isAssistant = message.role === 'assistant'
+  if (!message.content.trim()) return null
+  return (
+    <div
+      className={cn(
+        'rounded-lg border px-3 py-2.5 text-xs leading-5',
+        isAssistant
+          ? 'bg-panel border-border text-text'
+          : 'bg-[#1a1414] border-accent/30 text-[#f0d4c8]'
+      )}
+    >
+      {isAssistant ? (
+        <article className="tb-prose text-xs">
+          <ReactMarkdown remarkPlugins={[remarkGfm]}>{message.content}</ReactMarkdown>
+        </article>
+      ) : (
+        message.content
+      )}
     </div>
   )
 }
@@ -360,34 +430,6 @@ function DocumentModeButton({
       {icon}
     </button>
   )
-}
-
-function buildAssistantReply(prompt: string, title: string, content: string) {
-  const words = content.trim().split(/\s+/).filter(Boolean).length
-  const hasScope = /scope/i.test(content)
-  const hasRisks = /risk/i.test(content)
-  const base = title.trim() || 'this feature'
-
-  if (/risk/i.test(prompt)) {
-    return `For ${base}, capture technical risk, product ambiguity, dependency risk, and rollout risk. Add owner, mitigation, and a decision date for each.`
-  }
-  if (/milestone|step|phase/i.test(prompt)) {
-    return `A good milestone shape is discovery, design decisions, implementation, validation, and release. Keep each milestone tied to a concrete artifact or user-visible outcome.`
-  }
-  if (/acceptance|criteria/i.test(prompt)) {
-    return `Write acceptance criteria as observable behavior: given the project context, when the user opens Planning, then they can create, edit, switch, and keep plans without starting an agent run.`
-  }
-  if (/gap/i.test(prompt)) {
-    const gaps = [
-      hasScope ? null : 'scope boundaries',
-      hasRisks ? null : 'risks and mitigations',
-      words < 80 ? 'user workflow details' : null
-    ].filter(Boolean)
-    return gaps.length
-      ? `I would tighten ${gaps.join(', ')}. Add the decisions that would block engineering work if left implicit.`
-      : 'The plan has the core scaffolding. Next, make every open question actionable with an owner or decision trigger.'
-  }
-  return `For ${base}, turn the next planning pass into decisions, open questions, risks, and acceptance criteria. That keeps the document useful before implementation starts.`
 }
 
 function planningTemplate(title: string) {

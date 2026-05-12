@@ -15,6 +15,8 @@ import type {
   FeatureSession,
   GhAuthEvent,
   Plan,
+  PlanMessage,
+  PlanRunEvent,
   PRCreateResult,
   Project,
   Repo,
@@ -160,7 +162,23 @@ const api = {
       ipcRenderer.invoke(IPC.plansCreate, projectId, title),
     update: (planId: number, patch: { title?: string; content?: string }): Promise<Plan> =>
       ipcRenderer.invoke(IPC.plansUpdate, planId, patch),
-    delete: (planId: number): Promise<{ ok: true }> => ipcRenderer.invoke(IPC.plansDelete, planId)
+    delete: (planId: number): Promise<{ ok: true }> => ipcRenderer.invoke(IPC.plansDelete, planId),
+    listMessages: (planId: number): Promise<PlanMessage[]> =>
+      ipcRenderer.invoke(IPC.plansListMessages, planId),
+    sendPrompt: (args: {
+      planId: number
+      prompt: string
+      planTitle: string
+      planContent: string
+      model?: string
+    }): Promise<{ assistantMessageId: number }> => ipcRenderer.invoke(IPC.plansSendPrompt, args),
+    cancelPrompt: (planId: number): Promise<void> =>
+      ipcRenderer.invoke(IPC.plansCancelPrompt, planId),
+    onEvent: (cb: (evt: PlanRunEvent) => void) => {
+      const listener = (_e: IpcRendererEvent, evt: PlanRunEvent) => cb(evt)
+      ipcRenderer.on(IPC.plansEvent, listener)
+      return () => { ipcRenderer.off(IPC.plansEvent, listener) }
+    }
   },
   features: {
     list: (projectId: number): Promise<Feature[]> => ipcRenderer.invoke(IPC.featuresList, projectId),

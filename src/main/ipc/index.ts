@@ -21,6 +21,7 @@ import type { ModelUseCase } from '@shared/models'
 import * as features from '../services/features'
 import * as featureRunner from '../services/featureRunner'
 import * as plans from '../services/plans'
+import * as planningRunner from '../services/planningRunner'
 import {
   detectGh,
   ghAuthStatus,
@@ -53,6 +54,9 @@ export function registerIpc(win: BrowserWindow) {
   })
   featureRunner.featureBus.on('event', (evt) => {
     if (!win.isDestroyed()) win.webContents.send(IPC.featuresEvent, evt)
+  })
+  planningRunner.planBus.on('event', (evt) => {
+    if (!win.isDestroyed()) win.webContents.send(IPC.plansEvent, evt)
   })
 
   // ── config ───────────────────────────────────────────
@@ -286,6 +290,25 @@ export function registerIpc(win: BrowserWindow) {
     plans.deletePlan(planId)
     return { ok: true }
   })
+  ipcMain.handle(IPC.plansListMessages, (_e, planId: number) =>
+    planningRunner.listMessages(planId)
+  )
+  ipcMain.handle(
+    IPC.plansSendPrompt,
+    (
+      _e,
+      args: {
+        planId: number
+        prompt: string
+        planTitle: string
+        planContent: string
+        model?: string
+      }
+    ) => planningRunner.sendPrompt(args)
+  )
+  ipcMain.handle(IPC.plansCancelPrompt, (_e, planId: number) =>
+    planningRunner.cancelRun(planId)
+  )
 
   // ── features ─────────────────────────────────────────
   ipcMain.handle(IPC.featuresList, (_e, projectId: number) => features.listFeatures(projectId))

@@ -90,6 +90,15 @@ function migrate(d: Database.Database) {
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
     CREATE INDEX IF NOT EXISTS plans_project_updated_idx ON plans(project_id, updated_at DESC);
+    CREATE TABLE IF NOT EXISTS plan_messages (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      plan_id INTEGER NOT NULL REFERENCES plans(id) ON DELETE CASCADE,
+      role TEXT NOT NULL,
+      content TEXT NOT NULL,
+      activities TEXT,
+      ts TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS plan_messages_plan_idx ON plan_messages(plan_id, id ASC);
   `)
 
   // Add per-repo working_branch column for the "issues working branch" setting.
