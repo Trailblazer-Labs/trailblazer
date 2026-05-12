@@ -116,15 +116,15 @@ Bring your own setup:
 
 ## Download
 
-<!-- TODO: replace with real release URLs -->
+These links always resolve to the latest release.
 
 | Platform | Architecture | Link |
 | --- | --- | --- |
-| macOS  | Apple Silicon (arm64) | _coming soon_ |
-| macOS  | Intel (x64)           | _coming soon_ |
-| Windows | x64                  | _coming soon_ |
+| macOS  | Apple Silicon (arm64) | [Trailblazer-mac-arm64.dmg](https://github.com/Trailblazer-Labs/trailblazer/releases/latest/download/Trailblazer-mac-arm64.dmg) |
+| macOS  | Intel (x64)           | [Trailblazer-mac-x64.dmg](https://github.com/Trailblazer-Labs/trailblazer/releases/latest/download/Trailblazer-mac-x64.dmg) |
+| Windows | x64                  | [Trailblazer-win-x64.exe](https://github.com/Trailblazer-Labs/trailblazer/releases/latest/download/Trailblazer-win-x64.exe) |
 
-> Until first release, see [Building from source](#building-from-source).
+See [all releases](https://github.com/Trailblazer-Labs/trailblazer/releases) for changelogs, older versions, and checksums. After install, Trailblazer auto-updates in the background when a new release is published.
 
 ## Requirements
 

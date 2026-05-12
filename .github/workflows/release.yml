@@ -39,6 +39,13 @@ jobs:
           node-version: 22
           cache: npm
 
+      # node-pty's bundled node-gyp 9.x imports `distutils` which was removed in
+      # Python 3.12+. Pin Python 3.11 so the native rebuild succeeds.
+      - name: Setup Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
       - name: Install dependencies
         run: npm ci
 
@@ -62,3 +69,37 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+
+      # Sanity check: the README download links expect exactly these filenames,
+      # produced by the `artifactName` template in package.json. Fail loudly here
+      # rather than ship a release whose URLs 404.
+      - name: Verify release artifacts match README download URLs
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "${{ matrix.platform.name }}" in
+            macOS)
+              expected=("Trailblazer-mac-arm64.dmg" "Trailblazer-mac-x64.dmg")
+              ;;
+            Windows)
+              expected=("Trailblazer-win-x64.exe")
+              ;;
+            *)
+              echo "Unknown platform"; exit 1 ;;
+          esac
+          missing=()
+          for f in "${expected[@]}"; do
+            if [ ! -f "dist/$f" ]; then
+              missing+=("$f")
+            fi
+          done
+          if [ "${#missing[@]}" -ne 0 ]; then
+            echo "Expected artifacts missing from dist/: ${missing[*]}"
+            echo "Actual contents:"
+            ls -la dist/
+            exit 1
+          fi
+          echo "All expected artifacts present:"
+          for f in "${expected[@]}"; do
+            echo "  dist/$f"
+          done
