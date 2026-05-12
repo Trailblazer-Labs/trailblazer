@@ -33,6 +33,12 @@ import {
 } from '../services/ghAuth'
 import type { Project, Repo, AppConfig, Engine } from '@shared/types'
 
+const TRAILBLAZER_REPO = {
+  owner: 'Trailblazer-Labs',
+  name: 'trailblazer',
+  defaultBranch: 'main'
+}
+
 export function registerIpc(win: BrowserWindow) {
   // Broadcast run events to renderer.
   runner.runnerBus.on('event', (evt) => {
@@ -187,6 +193,52 @@ export function registerIpc(win: BrowserWindow) {
       return { id: Number(r.lastInsertRowid), localPath }
     }
   )
+
+  ipcMain.handle(IPC.projectsAddTrailblazer, async (): Promise<Project> => {
+    const db = getDb()
+    const existing = db
+      .prepare(
+        `SELECT p.id, p.name, p.created_at
+           FROM projects p
+           JOIN repos r ON r.project_id = p.id
+          WHERE r.owner = ? AND r.name = ?
+          ORDER BY p.id ASC
+          LIMIT 1`
+      )
+      .get(TRAILBLAZER_REPO.owner, TRAILBLAZER_REPO.name) as
+      | { id: number; name: string; created_at: string }
+      | undefined
+
+    if (existing) {
+      return { id: existing.id, name: existing.name, createdAt: existing.created_at }
+    }
+
+    const project =
+      (db
+        .prepare(`SELECT id, name, created_at FROM projects WHERE name = ? ORDER BY id ASC LIMIT 1`)
+        .get('Trailblazer') as { id: number; name: string; created_at: string } | undefined) ??
+      (() => {
+        const created = db.prepare('INSERT INTO projects(name) VALUES(?)').run('Trailblazer')
+        return {
+          id: Number(created.lastInsertRowid),
+          name: 'Trailblazer',
+          created_at: new Date().toISOString()
+        }
+      })()
+
+    const localPath = await ensureRepoCloned(TRAILBLAZER_REPO.owner, TRAILBLAZER_REPO.name)
+    db.prepare(
+      'INSERT OR IGNORE INTO repos(project_id, owner, name, default_branch, local_path) VALUES(?,?,?,?,?)'
+    ).run(
+      project.id,
+      TRAILBLAZER_REPO.owner,
+      TRAILBLAZER_REPO.name,
+      TRAILBLAZER_REPO.defaultBranch,
+      localPath
+    )
+
+    return { id: project.id, name: project.name, createdAt: project.created_at }
+  })
 
   ipcMain.handle(IPC.projectsRemoveRepo, (_e, repoId: number) => {
     getDb().prepare('DELETE FROM repos WHERE id = ?').run(repoId)

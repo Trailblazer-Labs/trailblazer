@@ -1,18 +1,34 @@
 import { useEffect, useState } from 'react'
+import { useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
+import { Github, Plus } from 'lucide-react'
 import { Button, Card } from './ui'
 import { Modal } from './NewIssueModal'
 import EnginePicker from './EnginePicker'
+import { useApp } from '../stores/app'
 import { mergedModels } from '@shared/models'
 import type { ModelUseCase } from '@shared/models'
 import type { AppConfig, Engine, EngineDetection, UpdateStatus } from '@shared/types'
 
 export default function SettingsModal({ onClose }: { onClose: () => void }) {
+  const setView = useApp((s) => s.setView)
+  const qc = useQueryClient()
+  const { data: projects = [] } = useQuery({
+    queryKey: ['projects'],
+    queryFn: () => window.api.projects.list()
+  })
+  const repoQueries = useQueries({
+    queries: projects.map((p) => ({
+      queryKey: ['repos', p.id],
+      queryFn: () => window.api.projects.listRepos(p.id)
+    }))
+  })
   const [detect, setDetect] = useState<EngineDetection | null>(null)
   const [engine, setEngine] = useState<Engine | null>(null)
   const [original, setOriginal] = useState<Engine | null>(null)
   const [config, setConfig] = useState<AppConfig | null>(null)
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null)
   const [busy, setBusy] = useState(false)
+  const [addingTrailblazer, setAddingTrailblazer] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   async function reload() {
@@ -56,12 +72,40 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
     location.reload()
   }
 
+  async function addTrailblazerProject() {
+    setAddingTrailblazer(true)
+    setError(null)
+    try {
+      const project = await window.api.projects.addTrailblazer()
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ['projects'] }),
+        qc.invalidateQueries({ queryKey: ['repos'] })
+      ])
+      onClose()
+      setView({ kind: 'project', projectId: project.id })
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'failed to add Trailblazer')
+    } finally {
+      setAddingTrailblazer(false)
+    }
+  }
+
   const changed = engine !== original
+  const hasTrailblazerProject = repoQueries.some((q) =>
+    (q.data ?? []).some((r) => r.owner === 'Trailblazer-Labs' && r.name === 'trailblazer')
+  )
 
   return (
     <Modal onClose={onClose}>
       <Card className="w-[560px] p-6 space-y-5">
         <div className="text-sm text-muted">Settings</div>
+
+        {!hasTrailblazerProject && (
+          <ContributeSettingsBanner
+            busy={addingTrailblazer}
+            onAdd={addTrailblazerProject}
+          />
+        )}
 
         {/* GitHub auth section */}
         <section className="space-y-2">
@@ -118,6 +162,34 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
         </div>
       </Card>
     </Modal>
+  )
+}
+
+function ContributeSettingsBanner({
+  busy,
+  onAdd
+}: {
+  busy: boolean
+  onAdd: () => void
+}) {
+  return (
+    <section className="rounded-md border border-accent/35 bg-[#17110f] p-3">
+      <div className="flex items-center gap-3">
+        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-border bg-bg">
+          <Github size={18} className="text-accent" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="text-sm">Contribute to Trailblazer</div>
+          <div className="text-xs text-muted">
+            Add this repo as a project to work on issues, features, and PRs from inside Trailblazer.
+          </div>
+        </div>
+        <Button variant="primary" onClick={onAdd} disabled={busy} className="shrink-0">
+          <Plus size={14} />
+          {busy ? 'Adding...' : 'Add project'}
+        </Button>
+      </div>
+    </section>
   )
 }
 
