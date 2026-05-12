@@ -14,6 +14,11 @@ export const IPC = {
   configSetModel: 'config:set-model',
   configDiscoverModels: 'config:discover-models',
   configCachedDiscoveredModels: 'config:cached-discovered-models',
+  updaterGetStatus: 'updater:get-status',
+  updaterCheck: 'updater:check',
+  updaterDownload: 'updater:download',
+  updaterQuitAndInstall: 'updater:quit-and-install',
+  updaterEvent: 'updater:event',
   // github
   githubValidatePat: 'github:validate-pat',
   githubSearchRepos: 'github:search-repos',

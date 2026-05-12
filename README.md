@@ -172,6 +172,32 @@ npm run package:mac    # produces a .dmg in dist/
 npm run package:win    # produces an .nsis installer in dist/
 ```
 
+### Auto updates
+
+Packaged builds check GitHub Releases for updates on startup and from Settings. macOS builds
+produce both `.dmg` and `.zip` artifacts because Electron's macOS updater needs the zip plus
+the generated update metadata.
+
+Merges to `main` publish macOS and Windows releases through GitHub Actions. The workflow derives
+the major/minor version from `package.json` and sets the packaged app version to
+`<major>.<minor>.<github-run-number>` before building, so each main-branch build has a higher
+SemVer version for the updater to discover. The release artifacts are uploaded to GitHub Releases
+under `Trailblazer-Labs/trailblazer`.
+
+For a prerelease:
+
+```bash
+npm version prerelease --preid beta
+npm run release:mac
+npm run release:win
+```
+
+The in-app updater allows prereleases so beta users can move forward without reinstalling
+manually. Production update installs should use signed builds, especially on macOS and Windows.
+Configure the `CSC_LINK` and `CSC_KEY_PASSWORD` repository secrets for code signing. Add the
+Apple notarization secrets `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`, and `APPLE_TEAM_ID` for
+signed macOS releases.
+
 ### Generating icons
 
 The icon SVG lives at `build/icon.svg`. Regenerate platform icons after editing:

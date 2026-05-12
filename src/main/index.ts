@@ -3,6 +3,7 @@ import path from 'node:path'
 import fs from 'node:fs'
 import { registerIpc } from './ipc'
 import { getDb } from './services/db'
+import { initUpdater } from './services/updater'
 
 // Override the default "Electron" app name shown in the macOS menu bar and Dock during dev.
 // In packaged builds this comes from CFBundleName in Info.plist (set via productName).
@@ -82,6 +83,7 @@ function createWindow() {
   }
 
   registerIpc(win)
+  initUpdater(win)
 }
 
 app.whenReady().then(() => {

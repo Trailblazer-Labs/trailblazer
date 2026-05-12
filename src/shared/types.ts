@@ -165,6 +165,24 @@ export interface AppConfig {
   ghLogin: string | null
 }
 
+export interface UpdateStatus {
+  state:
+    | 'idle'
+    | 'checking'
+    | 'available'
+    | 'not-available'
+    | 'downloading'
+    | 'downloaded'
+    | 'error'
+    | 'disabled'
+  currentVersion: string
+  availableVersion: string | null
+  downloadedVersion: string | null
+  percent: number | null
+  message: string | null
+  checkedAt: string | null
+}
+
 export type ExpandEvent =
   | { type: 'start'; engine: Engine }
   | { type: 'chunk'; stream: 'stdout' | 'stderr'; chunk: string }

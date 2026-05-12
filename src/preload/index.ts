@@ -22,7 +22,8 @@ import type {
   PullRequest,
   Run,
   RunEvent,
-  DiffFile
+  DiffFile,
+  UpdateStatus
 } from '../shared/types'
 
 const api = {
@@ -46,6 +47,18 @@ const api = {
       ipcRenderer.invoke(IPC.configCachedDiscoveredModels, engine),
     discoverModels: (engine: Engine): Promise<Array<{ id: string; label?: string }>> =>
       ipcRenderer.invoke(IPC.configDiscoverModels, engine)
+  },
+  updater: {
+    getStatus: (): Promise<UpdateStatus> => ipcRenderer.invoke(IPC.updaterGetStatus),
+    check: (): Promise<UpdateStatus> => ipcRenderer.invoke(IPC.updaterCheck),
+    download: (): Promise<UpdateStatus> => ipcRenderer.invoke(IPC.updaterDownload),
+    quitAndInstall: (): Promise<UpdateStatus> =>
+      ipcRenderer.invoke(IPC.updaterQuitAndInstall),
+    onEvent: (cb: (status: UpdateStatus) => void) => {
+      const listener = (_e: IpcRendererEvent, status: UpdateStatus) => cb(status)
+      ipcRenderer.on(IPC.updaterEvent, listener)
+      return () => { ipcRenderer.off(IPC.updaterEvent, listener) }
+    }
   },
   gh: {
     detect: (): Promise<{ found: boolean; path?: string; version?: string }> =>
