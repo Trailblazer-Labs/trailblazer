@@ -1,6 +1,8 @@
-import { useEffect, useMemo, useState } from 'react'
+import { type ReactNode, useEffect, useMemo, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { FileText, Lightbulb, Plus, Send, Sparkles, Trash2 } from 'lucide-react'
+import { Code2, Eye, FileText, Lightbulb, Plus, Send, Sparkles, Trash2 } from 'lucide-react'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import { Button, Input } from '../components/ui'
 import { cn } from '../lib/cn'
 import type { Plan } from '@shared/types'
@@ -23,6 +25,7 @@ export default function PlanningView({ projectId }: { projectId: number }) {
   const [activePlanId, setActivePlanId] = useState<number | null>(null)
   const [title, setTitle] = useState('')
   const [content, setContent] = useState('')
+  const [documentMode, setDocumentMode] = useState<'edit' | 'preview'>('edit')
   const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved'>('idle')
   const [assistantInput, setAssistantInput] = useState('')
   const [messages, setMessages] = useState<AssistantMessage[]>([
@@ -189,6 +192,20 @@ export default function PlanningView({ projectId }: { projectId: number }) {
                 aria-label="Plan title"
               />
               <div className="ml-auto flex items-center gap-3">
+                <div className="inline-flex p-1 rounded-md border border-border bg-bg">
+                  <DocumentModeButton
+                    active={documentMode === 'edit'}
+                    onClick={() => setDocumentMode('edit')}
+                    label="Code"
+                    icon={<Code2 size={14} />}
+                  />
+                  <DocumentModeButton
+                    active={documentMode === 'preview'}
+                    onClick={() => setDocumentMode('preview')}
+                    label="Render"
+                    icon={<Eye size={14} />}
+                  />
+                </div>
                 <span className="text-[10px] uppercase tracking-wider text-muted">
                   {saveState === 'saving' ? 'Saving' : saveState === 'saved' ? 'Saved' : 'Local'}
                 </span>
@@ -203,14 +220,28 @@ export default function PlanningView({ projectId }: { projectId: number }) {
               </div>
             </header>
             <div className="flex-1 min-h-0 overflow-hidden">
-              <textarea
-                value={content}
-                onChange={(e) => setContent(e.target.value)}
-                spellCheck
-                className="no-drag w-full h-full resize-none bg-[#0d0d0d] text-[#e8e8e8] outline-none px-10 py-8 text-[15px] leading-7 font-mono placeholder:text-muted selection:bg-accent/30"
-                placeholder="# Start planning..."
-                aria-label="Plan content"
-              />
+              {documentMode === 'edit' ? (
+                <textarea
+                  value={content}
+                  onChange={(e) => setContent(e.target.value)}
+                  spellCheck
+                  className="no-drag w-full h-full resize-none bg-[#0d0d0d] text-[#e8e8e8] outline-none px-10 py-8 text-[15px] leading-7 font-mono placeholder:text-muted selection:bg-accent/30"
+                  placeholder="# Start planning..."
+                  aria-label="Plan content"
+                />
+              ) : (
+                <div className="h-full overflow-y-auto bg-[#0d0d0d] px-10 py-8">
+                  {content.trim() ? (
+                    <article className="tb-prose max-w-4xl">
+                      <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
+                    </article>
+                  ) : (
+                    <div className="h-full flex items-center justify-center text-xs text-muted">
+                      Nothing to render yet.
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           </>
         ) : (
@@ -300,6 +331,34 @@ export default function PlanningView({ projectId }: { projectId: number }) {
         </footer>
       </aside>
     </div>
+  )
+}
+
+function DocumentModeButton({
+  active,
+  onClick,
+  icon,
+  label
+}: {
+  active: boolean
+  onClick: () => void
+  icon: ReactNode
+  label: string
+}) {
+  return (
+    <button
+      onClick={onClick}
+      title={label}
+      aria-label={label}
+      className={cn(
+        'no-drag w-7 h-7 rounded flex items-center justify-center transition-colors',
+        active
+          ? 'bg-panel text-text border border-border'
+          : 'text-muted hover:text-text border border-transparent'
+      )}
+    >
+      {icon}
+    </button>
   )
 }
 
