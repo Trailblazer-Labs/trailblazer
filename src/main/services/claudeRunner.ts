@@ -16,6 +16,7 @@ import * as gh from './github'
 import { getEngine, spawnAgent } from './engine'
 import { createParser } from './agentParser'
 import { getModel } from './modelPrefs'
+import { AGENT_INSTRUCTIONS_FILE_PROMPT } from './agentInstructions'
 import type { Run, RunEvent, DiffFile } from '@shared/types'
 
 export const runnerBus = new EventEmitter()
@@ -230,6 +231,7 @@ async function cleanupWorktree(runId: string) {
 function buildPrompt(title: string, body: string): string {
   return [
     'You are working inside a git worktree to resolve a single GitHub issue.',
+    AGENT_INSTRUCTIONS_FILE_PROMPT,
     'Make the minimal set of code changes to fully resolve the issue.',
     'Do not run git commit or git push — Trailblazer handles version control.',
     'When done, stop.',
@@ -240,4 +242,3 @@ function buildPrompt(title: string, body: string): string {
     body || '(no description provided)'
   ].join('\n')
 }
-

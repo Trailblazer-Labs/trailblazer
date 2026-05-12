@@ -21,6 +21,7 @@ import * as gh from './github'
 import { getAuthMode, ghGetToken } from './ghAuth'
 import { kvGetSecret } from './db'
 import { getModel, setModel } from './modelPrefs'
+import { AGENT_INSTRUCTIONS_FILE_PROMPT } from './agentInstructions'
 import type {
   AgentActivity,
   Engine,
@@ -366,6 +367,7 @@ function buildFirstTurnPrompt(
     repoLines,
     '',
     'Guidelines:',
+    AGENT_INSTRUCTIONS_FILE_PROMPT,
     '- Make whatever changes are needed across one or more repos.',
     '- Use git inside the relevant repo subdirectory if you need to commit.',
     '- Do NOT run `git push` — the user will press "Create PRs" when they are ready.',
@@ -899,6 +901,8 @@ async function generatePRMessage(args: {
     `Repository: ${args.repoName}`,
     `Feature: ${args.featureName}`,
     `Base branch: ${args.baseBranch}`,
+    ``,
+    AGENT_INSTRUCTIONS_FILE_PROMPT,
     ``,
     `Commits on this branch:`,
     commitLines || '(none)',
