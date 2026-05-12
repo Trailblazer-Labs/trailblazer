@@ -38,6 +38,7 @@ export const IPC = {
   projectsCreate: 'projects:create',
   projectsDelete: 'projects:delete',
   projectsAddRepo: 'projects:add-repo',
+  projectsAddTrailblazer: 'projects:add-trailblazer',
   projectsRemoveRepo: 'projects:remove-repo',
   projectsListRepos: 'projects:list-repos',
   // features

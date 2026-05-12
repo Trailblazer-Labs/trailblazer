@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
+import { Github, Plus, X } from 'lucide-react'
 import { Button, Card, Input } from '../components/ui'
 import { useApp } from '../stores/app'
 import RepoPicker from '../components/RepoPicker'
@@ -32,6 +33,11 @@ export default function Projects() {
 
   const [creating, setCreating] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
+  const [showContributeBanner, setShowContributeBanner] = useState(
+    () => localStorage.getItem('trailblazer.contributeBanner.hidden') !== 'true'
+  )
+  const [addingTrailblazer, setAddingTrailblazer] = useState(false)
+  const [contributeError, setContributeError] = useState<string | null>(null)
   const [query, setQuery] = useState('')
 
   const filtered = useMemo(() => {
@@ -43,6 +49,27 @@ export default function Projects() {
   function refresh() {
     void qc.invalidateQueries({ queryKey: ['projects'] })
     void qc.invalidateQueries({ queryKey: ['repos'] })
+  }
+
+  async function addTrailblazerProject() {
+    setAddingTrailblazer(true)
+    setContributeError(null)
+    try {
+      const project = await window.api.projects.addTrailblazer()
+      localStorage.setItem('trailblazer.contributeBanner.hidden', 'true')
+      setShowContributeBanner(false)
+      refresh()
+      setView({ kind: 'project', projectId: project.id })
+    } catch (e) {
+      setContributeError(e instanceof Error ? e.message : 'failed to add Trailblazer')
+    } finally {
+      setAddingTrailblazer(false)
+    }
+  }
+
+  function hideContributeBanner() {
+    localStorage.setItem('trailblazer.contributeBanner.hidden', 'true')
+    setShowContributeBanner(false)
   }
 
   return (
@@ -134,6 +161,55 @@ export default function Projects() {
         </Modal>
       )}
       {showSettings && <SettingsModal onClose={() => setShowSettings(false)} />}
+      {showContributeBanner && (
+        <ContributeBanner
+          busy={addingTrailblazer}
+          error={contributeError}
+          onAdd={addTrailblazerProject}
+          onHide={hideContributeBanner}
+        />
+      )}
+    </div>
+  )
+}
+
+function ContributeBanner({
+  busy,
+  error,
+  onAdd,
+  onHide
+}: {
+  busy: boolean
+  error: string | null
+  onAdd: () => void
+  onHide: () => void
+}) {
+  return (
+    <div className="fixed inset-x-0 bottom-5 z-30 pointer-events-none px-5">
+      <div className="pointer-events-auto mx-auto flex max-w-4xl items-center gap-3 rounded-lg border border-accent/35 bg-[#15110f]/95 px-4 py-3 shadow-2xl shadow-black/40 backdrop-blur">
+        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-border bg-bg">
+          <Github size={18} className="text-accent" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="text-sm">Contribute to Trailblazer</div>
+          <div className="truncate text-xs text-muted">
+            Add the Trailblazer repo as a normal project with issues, features, and PRs ready to use.
+            {error && <span className="ml-2 text-red-400">{error}</span>}
+          </div>
+        </div>
+        <Button variant="primary" onClick={onAdd} disabled={busy} className="shrink-0">
+          <Plus size={14} />
+          {busy ? 'Adding...' : 'Add project'}
+        </Button>
+        <button
+          type="button"
+          onClick={onHide}
+          aria-label="Hide contribute banner"
+          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-muted hover:bg-panel hover:text-text"
+        >
+          <X size={16} />
+        </button>
+      </div>
     </div>
   )
 }
