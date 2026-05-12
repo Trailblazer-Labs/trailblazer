@@ -44,6 +44,14 @@ export default function FeatureChatView({
   const qc = useQueryClient()
   const [draft, setDraft] = useState('')
   const [running, setRunning] = useState(false)
+  const [runStartedAt, setRunStartedAt] = useState<number | null>(null)
+  const [lastActivityAt, setLastActivityAt] = useState<number | null>(null)
+  const [now, setNow] = useState(Date.now())
+  useEffect(() => {
+    if (!running) return
+    const t = window.setInterval(() => setNow(Date.now()), 1000)
+    return () => window.clearInterval(t)
+  }, [running])
   const [liveActivities, setLiveActivities] = useState<AgentActivity[]>([])
   const [perRepoSummary, setPerRepoSummary] = useState<RepoSummary[] | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -100,6 +108,16 @@ export default function FeatureChatView({
     }
   }, [messages, liveActivities])
 
+  // Coalesce rapid file-mutating tool completions into one Changes-panel refresh.
+  const changesRefreshTimer = useRef<number | null>(null)
+  function scheduleChangesRefresh() {
+    if (changesRefreshTimer.current) return
+    changesRefreshTimer.current = window.setTimeout(() => {
+      changesRefreshTimer.current = null
+      void qc.invalidateQueries({ queryKey: ['feature-changes', featureId] })
+    }, 400)
+  }
+
   useEffect(() => {
     const unsub = window.api.features.onEvent((evt) => {
       if (evt.featureId !== featureId) return
@@ -108,9 +126,26 @@ export default function FeatureChatView({
         setPerRepoSummary(null)
         setError(null)
         setRunning(true)
+        const t = Date.now()
+        setRunStartedAt(t)
+        setLastActivityAt(t)
         void qc.invalidateQueries({ queryKey: ['feature-messages', resolvedSessionId] })
       } else if (evt.type === 'activity') {
         setLiveActivities((prev) => applyActivity(prev, evt.activity))
+        setLastActivityAt(Date.now())
+        // When the agent finishes a file-mutating tool call, refresh the Changes panel
+        // so the user sees edits land in real time instead of only at end-of-turn.
+        const a = evt.activity
+        if (
+          a.kind === 'tool' &&
+          a.status === 'done' &&
+          (a.tool === 'Edit' ||
+            a.tool === 'Write' ||
+            a.tool === 'MultiEdit' ||
+            a.tool === 'Bash')
+        ) {
+          scheduleChangesRefresh()
+        }
       } else if (evt.type === 'done') {
         setPerRepoSummary(evt.perRepo)
         setRunning(false)
@@ -249,12 +284,29 @@ export default function FeatureChatView({
           ))}
           {running && (
             <div className="max-w-3xl mx-auto">
-              <div className="text-[10px] uppercase tracking-wider text-muted mb-2">Working…</div>
+              <div className="mb-2 flex items-center gap-2 text-[10px] uppercase tracking-wider text-muted">
+                <span>Working…</span>
+                {runStartedAt && (
+                  <span className="font-mono tracking-normal normal-case text-muted/70">
+                    {formatElapsed(now - runStartedAt)}
+                  </span>
+                )}
+                {lastActivityAt && now - lastActivityAt > 30_000 && (
+                  <span className="flex items-center gap-1 text-amber-400 normal-case">
+                    <span className="tb-pulse inline-block w-1.5 h-1.5 rounded-full bg-amber-400" />
+                    no events for {formatElapsed(now - lastActivityAt)} · agent likely reasoning
+                  </span>
+                )}
+              </div>
               <ActivityList
                 items={liveActivities}
                 engineLabel="Agent"
                 busy
-                emptyLabel="Spinning up agent…"
+                emptyLabel={
+                  runStartedAt && now - runStartedAt > 5000
+                    ? 'Agent is thinking — no events yet…'
+                    : 'Spinning up agent…'
+                }
               />
             </div>
           )}
@@ -388,6 +440,14 @@ function ChatModelPicker({
       {!isCustom && <option value="__custom__">Custom…</option>}
     </select>
   )
+}
+
+function formatElapsed(ms: number): string {
+  const s = Math.max(0, Math.floor(ms / 1000))
+  if (s < 60) return `${s}s`
+  const m = Math.floor(s / 60)
+  const r = s % 60
+  return `${m}m ${r.toString().padStart(2, '0')}s`
 }
 
 function MessageBubble({ message }: { message: FeatureMessage }) {

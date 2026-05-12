@@ -87,6 +87,24 @@ export async function pushBranch(worktreePath: string, branch: string): Promise<
   await git.push(['-u', 'origin', branch])
 }
 
+/**
+ * Rewrite the `origin` remote URL with the current token. Cloned repos store the
+ * token in their .git/config; without this, every push reuses the token that was
+ * valid at clone time even if the user has since refreshed/rotated their gh token.
+ */
+export async function refreshRemoteUrl(
+  worktreePath: string,
+  owner: string,
+  name: string
+): Promise<void> {
+  const git = simpleGit(worktreePath)
+  try {
+    await git.remote(['set-url', 'origin', cloneUrl(owner, name)])
+  } catch {
+    // best-effort — if remote doesn't exist or git errors, push will surface the real issue.
+  }
+}
+
 export async function removeWorktree(repoPath: string, worktreePath: string): Promise<void> {
   const git = simpleGit(repoPath)
   try {

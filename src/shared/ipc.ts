@@ -6,6 +6,7 @@ export const IPC = {
   ghStatus: 'gh:status',
   ghLoginStart: 'gh:login-start',
   ghLoginCancel: 'gh:login-cancel',
+  ghRefreshScopes: 'gh:refresh-scopes',
   ghSignOut: 'gh:sign-out',
   ghEvent: 'gh:event',
   configSetEngine: 'config:set-engine',

@@ -8,6 +8,7 @@ import {
   commitAll,
   hasChanges,
   pushBranch,
+  refreshRemoteUrl,
   removeWorktree,
   ensureRepoCloned
 } from './git'
@@ -186,6 +187,7 @@ export async function approvePush(runId: string): Promise<{ prNumber: number; ur
   if (!ctx) throw new Error('run not found or already completed')
   if (ctx.run.status !== 'awaiting-approval') throw new Error('run is not awaiting approval')
 
+  await refreshRemoteUrl(ctx.run.worktreePath, ctx.repoOwner, ctx.repoName)
   await pushBranch(ctx.run.worktreePath, ctx.run.branch)
   const pr = await gh.createPull(ctx.repoOwner, ctx.repoName, {
     title: ctx.issueTitle,
