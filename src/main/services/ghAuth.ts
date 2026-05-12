@@ -229,6 +229,90 @@ export function cancelGhLogin() {
   }
 }
 
+/**
+ * Re-run `gh auth refresh` with extra scopes (e.g. `workflow` so the agent can update
+ * `.github/workflows/*` files). Emits the same event bus as login so the renderer can
+ * reuse the same code-display flow.
+ */
+export async function startGhRefreshScopes(scopes: string[]) {
+  cancelGhLogin()
+  const ghPath = await resolveGhPath()
+  const scopeArg = scopes.join(',')
+  // Use defaults for hostname / protocol (already set when the user logged in originally).
+  // Adding --git-protocol or --hostname can re-trigger prompts on `refresh`.
+  const args = ['auth', 'refresh', '-h', 'github.com', '-s', scopeArg]
+  // eslint-disable-next-line no-console
+  console.log('[ghAuth] spawning', ghPath, args.join(' '))
+
+  let term: pty.IPty
+  try {
+    term = pty.spawn(ghPath, args, {
+      name: 'xterm-color',
+      cols: 120,
+      rows: 30,
+      env: buildEnv()
+    })
+  } catch (e) {
+    ghBus.emit('event', {
+      type: 'error',
+      message: `Failed to spawn gh: ${e instanceof Error ? e.message : String(e)}`
+    } as GhEvent)
+    return
+  }
+  activeTerm = term
+
+  let codeEmitted = false
+  let buffer = ''
+  let pressEnterSent = false
+  let yesSent = false
+
+  term.onData((data) => {
+    process.stdout.write(`[gh-refresh] ${data}`)
+    buffer += data
+    if (buffer.length > 4000) buffer = buffer.slice(-4000)
+    const clean = buffer.replace(/\x1b\[[0-9;?]*[a-zA-Z]/g, '')
+
+    if (!codeEmitted) {
+      const codeMatch = clean.match(/one-time code:?\s*\*?\s*([A-Z0-9]{4}-?[A-Z0-9]{4})/i)
+      const urlMatch = clean.match(/(https:\/\/github\.com\/login\/device)/)
+      if (codeMatch) {
+        codeEmitted = true
+        ghBus.emit('event', {
+          type: 'code',
+          code: codeMatch[1],
+          url: urlMatch ? urlMatch[1] : 'https://github.com/login/device'
+        } as GhEvent)
+      }
+    }
+    if (!pressEnterSent && /Press Enter to open/i.test(clean)) {
+      pressEnterSent = true
+      term.write('\r')
+    }
+    if (!yesSent && /\(Y\/n\)|\(y\/N\)/i.test(clean)) {
+      yesSent = true
+      term.write('y\r')
+    }
+  })
+
+  term.onExit(async ({ exitCode }) => {
+    activeTerm = null
+    // eslint-disable-next-line no-console
+    console.log('[ghAuth] gh refresh exited with code', exitCode)
+    const status = await ghAuthStatus()
+    const token = await ghGetToken()
+    if (status.signedIn && token) {
+      setAuthMode('gh')
+      setPat(token)
+      ghBus.emit('event', { type: 'done', login: status.login! } as GhEvent)
+    } else {
+      ghBus.emit('event', {
+        type: 'error',
+        message: `gh refresh exited with code ${exitCode}`
+      } as GhEvent)
+    }
+  })
+}
+
 export async function ghSignOut() {
   try {
     const d = await detectGh()

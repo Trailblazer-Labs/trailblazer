@@ -213,13 +213,15 @@ function createCodexParser(): AgentParser {
       case 'agent_message':
       case 'assistant_message': {
         // Codex agent message — surface as a message bubble that updates in place.
-        const text: string =
+        const rawText =
           item.text ??
-          item.content ??
           item.message ??
-          (Array.isArray(item.content)
-            ? item.content.map((c: any) => (typeof c === 'string' ? c : c?.text ?? '')).join('')
-            : '')
+          (typeof item.content === 'string'
+            ? item.content
+            : Array.isArray(item.content)
+              ? item.content.map((c: any) => (typeof c === 'string' ? c : c?.text ?? '')).join('')
+              : '')
+        const text: string = typeof rawText === 'string' ? rawText : ''
         if (!text.trim()) return
         const a: AgentActivity = {
           id: itemId,
@@ -278,20 +280,20 @@ function createCodexParser(): AgentParser {
       case 'apply_patch':
       case 'edit':
       case 'write': {
-        const files: string[] =
-          (Array.isArray(item.files) && item.files.map((f: any) => f.path ?? f)) ||
-          filenamesFromChanges(item.changes) ||
-          (item.path ? [item.path] : [])
+        const files = extractItemFiles(item)
+        const isWrite = itemType === 'write'
         const a: AgentActivity = {
           id: itemId,
           kind: 'tool',
-          tool: itemType === 'write' ? 'Write' : 'Edit',
+          tool: isWrite ? 'Write' : 'Edit',
           label:
             files.length === 1
-              ? `${itemType === 'write' ? 'Write' : 'Edit'} ${shortenPath(files[0])}`
+              ? `${isWrite ? 'Write' : 'Edit'} ${shortenPath(files[0])}`
               : files.length > 1
-                ? `Edit ${files.length} files`
-                : 'Apply patch',
+                ? `${isWrite ? 'Write' : 'Edit'} ${files.length} files`
+                : isWrite
+                  ? 'Write file'
+                  : 'Apply patch',
           detail: files.length > 1 ? files.map(shortenPath).join(', ') : undefined,
           status,
           ts: now
@@ -508,8 +510,59 @@ function createCodexParser(): AgentParser {
   }
 }
 
+/**
+ * Codex events use several shapes for "what files did this touch":
+ *   item.files = ["path", ...]
+ *   item.files = [{ path: "..." }, ...]
+ *   item.changes = ["path", ...] | [{ path: "..." }] | { "path": {...} }
+ *   item.path / item.file_path / item.file / item.target = "path"
+ * Pull them all into a single string[].
+ */
+function extractItemFiles(item: Record<string, unknown> | null | undefined): string[] {
+  if (!item) return []
+  const fromList = (arr: unknown): string[] =>
+    Array.isArray(arr)
+      ? arr
+          .map((c) => {
+            if (typeof c === 'string') return c
+            const obj = c as Record<string, unknown>
+            return (
+              (obj?.path as string) ??
+              (obj?.file as string) ??
+              (obj?.filename as string) ??
+              ''
+            )
+          })
+          .filter((s): s is string => typeof s === 'string' && s.length > 0)
+      : []
+  const fromFiles = fromList(item.files)
+  if (fromFiles.length) return fromFiles
+  const fromChanges = fromList(item.changes)
+  if (fromChanges.length) return fromChanges
+  if (item.changes && typeof item.changes === 'object' && !Array.isArray(item.changes)) {
+    return Object.keys(item.changes as Record<string, unknown>)
+  }
+  const single =
+    (typeof item.path === 'string' && item.path) ||
+    (typeof item.file_path === 'string' && item.file_path) ||
+    (typeof item.file === 'string' && item.file) ||
+    (typeof item.target === 'string' && item.target) ||
+    ''
+  return single ? [single as string] : []
+}
+
 function filenamesFromChanges(changes: unknown): string[] {
-  if (!changes || typeof changes !== 'object') return []
+  if (!changes) return []
+  if (Array.isArray(changes)) {
+    return changes
+      .map((c) => {
+        if (typeof c === 'string') return c
+        const obj = c as Record<string, unknown>
+        return (obj?.path as string) ?? (obj?.file as string) ?? ''
+      })
+      .filter((s): s is string => typeof s === 'string' && s.length > 0)
+  }
+  if (typeof changes !== 'object') return []
   return Object.keys(changes as Record<string, unknown>)
 }
 

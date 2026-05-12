@@ -67,6 +67,8 @@ const api = {
       ipcRenderer.invoke(IPC.ghStatus),
     loginStart: (): Promise<{ ok: true }> => ipcRenderer.invoke(IPC.ghLoginStart),
     loginCancel: (): Promise<{ ok: true }> => ipcRenderer.invoke(IPC.ghLoginCancel),
+    refreshScopes: (scopes: string[]): Promise<{ ok: true }> =>
+      ipcRenderer.invoke(IPC.ghRefreshScopes, scopes),
     signOut: (): Promise<void> => ipcRenderer.invoke(IPC.ghSignOut),
     onEvent: (cb: (evt: GhAuthEvent) => void) => {
       const listener = (_e: IpcRendererEvent, evt: GhAuthEvent) => cb(evt)

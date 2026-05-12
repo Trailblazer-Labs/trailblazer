@@ -133,10 +133,18 @@ export function buildAgentArgs(
     return base
   }
   // Codex CLI — `codex exec` is the non-interactive entrypoint.
+  // `--sandbox` controls fs writability; `--json` emits structured event JSONL.
   const sandbox = mode === 'write' ? 'workspace-write' : 'read-only'
+  if (opts?.resume) {
+    // Codex `exec` flags must come BEFORE the `resume` sub-subcommand; resume itself
+    // only takes `<session_id> [prompt]`.
+    const args = ['exec', '--sandbox', sandbox, '--skip-git-repo-check', '--json']
+    if (opts.model && !isAutoModel(opts.model)) args.push('--model', opts.model)
+    args.push('resume', opts.resume, prompt)
+    return args
+  }
   const base = ['exec', '--sandbox', sandbox, '--skip-git-repo-check', '--json']
-  if (opts?.model) base.push('--model', opts.model)
-  if (opts?.resume) base.push('resume', opts.resume, '--')
+  if (opts?.model && !isAutoModel(opts.model)) base.push('--model', opts.model)
   base.push(prompt)
   return base
 }

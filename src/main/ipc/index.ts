@@ -26,6 +26,7 @@ import {
   ghBus,
   startGhLogin,
   cancelGhLogin,
+  startGhRefreshScopes,
   ghSignOut,
   getAuthMode,
   setAuthMode
@@ -81,6 +82,10 @@ export function registerIpc(win: BrowserWindow) {
   })
   ipcMain.handle(IPC.ghLoginCancel, () => {
     cancelGhLogin()
+    return { ok: true }
+  })
+  ipcMain.handle(IPC.ghRefreshScopes, (_e, scopes: string[]) => {
+    startGhRefreshScopes(scopes)
     return { ok: true }
   })
   ipcMain.handle(IPC.ghSignOut, () => ghSignOut())
