@@ -20,6 +20,7 @@ import {
 import type { ModelUseCase } from '@shared/models'
 import * as features from '../services/features'
 import * as featureRunner from '../services/featureRunner'
+import * as plans from '../services/plans'
 import {
   detectGh,
   ghAuthStatus,
@@ -216,6 +217,22 @@ export function registerIpc(win: BrowserWindow) {
       localPath: r.local_path,
       workingBranch: r.working_branch
     }))
+  })
+
+  // ── planning ────────────────────────────────────────
+  ipcMain.handle(IPC.plansList, (_e, projectId: number) => plans.listPlans(projectId))
+  ipcMain.handle(IPC.plansGet, (_e, planId: number) => plans.getPlan(planId))
+  ipcMain.handle(IPC.plansCreate, (_e, projectId: number, title?: string) =>
+    plans.createPlan(projectId, title)
+  )
+  ipcMain.handle(
+    IPC.plansUpdate,
+    (_e, planId: number, patch: { title?: string; content?: string }) =>
+      plans.updatePlan(planId, patch)
+  )
+  ipcMain.handle(IPC.plansDelete, (_e, planId: number) => {
+    plans.deletePlan(planId)
+    return { ok: true }
   })
 
   // ── features ─────────────────────────────────────────

@@ -24,6 +24,15 @@ export interface Feature {
   createdAt: string
 }
 
+export interface Plan {
+  id: number
+  projectId: number
+  title: string
+  content: string
+  createdAt: string
+  updatedAt: string
+}
+
 export interface FeatureRepo {
   featureId: number
   repoId: number

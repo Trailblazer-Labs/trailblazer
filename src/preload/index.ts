@@ -14,6 +14,7 @@ import type {
   FeatureRunEvent,
   FeatureSession,
   GhAuthEvent,
+  Plan,
   PRCreateResult,
   Project,
   Repo,
@@ -149,6 +150,15 @@ const api = {
     removeRepo: (repoId: number) => ipcRenderer.invoke(IPC.projectsRemoveRepo, repoId),
     listRepos: (projectId: number): Promise<Repo[]> =>
       ipcRenderer.invoke(IPC.projectsListRepos, projectId)
+  },
+  plans: {
+    list: (projectId: number): Promise<Plan[]> => ipcRenderer.invoke(IPC.plansList, projectId),
+    get: (planId: number): Promise<Plan | null> => ipcRenderer.invoke(IPC.plansGet, planId),
+    create: (projectId: number, title?: string): Promise<Plan> =>
+      ipcRenderer.invoke(IPC.plansCreate, projectId, title),
+    update: (planId: number, patch: { title?: string; content?: string }): Promise<Plan> =>
+      ipcRenderer.invoke(IPC.plansUpdate, planId, patch),
+    delete: (planId: number): Promise<{ ok: true }> => ipcRenderer.invoke(IPC.plansDelete, planId)
   },
   features: {
     list: (projectId: number): Promise<Feature[]> => ipcRenderer.invoke(IPC.featuresList, projectId),

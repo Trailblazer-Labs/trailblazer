@@ -11,6 +11,7 @@ import ItemRow from '../components/ItemRow'
 import LoadMoreSentinel from '../components/LoadMoreSentinel'
 import ReposPopover from '../components/ReposPopover'
 import FeaturesView from './FeaturesView'
+import PlanningView from './PlanningView'
 import type { Issue, PullRequest, Repo } from '@shared/types'
 
 type IssueRow = Issue & { repo: Repo }
@@ -100,7 +101,7 @@ export default function ProjectView({ projectId }: { projectId: number }) {
   const [selectedPR, setSelectedPR] = useState<PRRow | null>(null)
   const [showNewIssue, setShowNewIssue] = useState(false)
   const [showRun, setShowRun] = useState(false)
-  const [tab, setTab] = useState<'issues' | 'features'>('features')
+  const [tab, setTab] = useState<'issues' | 'features' | 'planning'>('features')
   const [repoFilter, setRepoFilter] = useState<number | null>(null) // null = All
   const [prFilters, setPrFilters] = useState({
     open: true,
@@ -186,6 +187,9 @@ export default function ProjectView({ projectId }: { projectId: number }) {
             <TabPill active={tab === 'features'} onClick={() => setTab('features')}>
               Features
             </TabPill>
+            <TabPill active={tab === 'planning'} onClick={() => setTab('planning')}>
+              Planning
+            </TabPill>
             <TabPill active={tab === 'issues'} onClick={() => setTab('issues')}>
               Issues
             </TabPill>
@@ -199,6 +203,12 @@ export default function ProjectView({ projectId }: { projectId: number }) {
         {tab === 'features' && (
           <div className="flex-1 min-h-0 overflow-hidden">
             <FeaturesView projectId={projectId} repos={repos} />
+          </div>
+        )}
+
+        {tab === 'planning' && (
+          <div className="flex-1 min-h-0 overflow-hidden">
+            <PlanningView projectId={projectId} />
           </div>
         )}
 

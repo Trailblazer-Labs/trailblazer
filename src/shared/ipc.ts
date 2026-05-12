@@ -40,6 +40,12 @@ export const IPC = {
   projectsAddRepo: 'projects:add-repo',
   projectsRemoveRepo: 'projects:remove-repo',
   projectsListRepos: 'projects:list-repos',
+  // planning
+  plansList: 'plans:list',
+  plansGet: 'plans:get',
+  plansCreate: 'plans:create',
+  plansUpdate: 'plans:update',
+  plansDelete: 'plans:delete',
   // features
   featuresList: 'features:list',
   featuresGet: 'features:get',
