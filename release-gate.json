@@ -1,0 +1,7 @@
+{
+  "disabled": false,
+  "minSupportedVersion": "1.0.0",
+  "blockedVersions": [],
+  "message": "This version of Trailblazer is no longer supported. Install the latest release.",
+  "updateUrl": "https://github.com/Trailblazer-Labs/trailblazer/releases/latest"
+}

@@ -19,6 +19,7 @@ import remarkGfm from 'remark-gfm'
 import { Button, Input } from '../components/ui'
 import ActivityList, { applyActivity } from '../components/ActivityList'
 import { cn } from '../lib/cn'
+import { filesFromClipboard, filesFromDrop, filesToPromptAttachments } from '../lib/chatAttachments'
 import { useApp } from '../stores/app'
 import type {
   AgentActivity,
@@ -65,6 +66,10 @@ export default function PlanningView({ projectId, repos }: { projectId: number; 
   const [liveActivities, setLiveActivities] = useState<AgentActivity[]>([])
   const [converting, setConverting] = useState(false)
   const [attachments, setAttachments] = useState<PlanPromptAttachment[]>([])
+  const [queuedAssistantTurn, setQueuedAssistantTurn] = useState<{
+    prompt: string
+    attachments: PlanPromptAttachment[]
+  } | null>(null)
 
   const { data: plans = [] } = useQuery({
     queryKey: ['plans', projectId],
@@ -141,12 +146,17 @@ export default function PlanningView({ projectId, repos }: { projectId: number; 
     setContent((current) => `${current.trimEnd()}\n\n${section}\n`)
   }
 
-  async function sendAssistant(text = assistantInput) {
-    const prompt = text.trim() || (attachments.length > 0 ? 'Review the attached files.' : '')
-    if (!prompt || !activePlan || assistantRunning) return
+  async function sendAssistant(text = assistantInput, files = attachments) {
+    const prompt = text.trim() || (files.length > 0 ? 'Review the attached files.' : '')
+    if (!prompt || !activePlan) return
+    if (assistantRunning) {
+      setQueuedAssistantTurn({ prompt, attachments: files })
+      setAssistantInput('')
+      setAttachments([])
+      return
+    }
     setAssistantInput('')
     setAssistantError(null)
-    const files = attachments
     setAttachments([])
     try {
       await window.api.plans.sendPrompt({
@@ -163,29 +173,24 @@ export default function PlanningView({ projectId, repos }: { projectId: number; 
     }
   }
 
-  async function addAttachments(files: FileList | null) {
+  async function addAttachments(files: FileList | File[] | null) {
     if (!files || files.length === 0) return
-    const maxBytes = 10_000_000
-    const next: PlanPromptAttachment[] = []
-    for (const file of Array.from(files)) {
-      if (file.size > maxBytes) {
-        setAssistantError(`${file.name} is too large. Attach files under 10 MB.`)
-        continue
-      }
-      const content = await file.text()
-      next.push({
-        name: file.name,
-        type: file.type,
-        size: file.size,
-        content
-      })
-    }
-    if (next.length > 0) {
+    const next = await filesToPromptAttachments(files)
+    if (next.errors.length > 0) setAssistantError(next.errors.join('\n'))
+    if (next.attachments.length > 0) {
       setAssistantError(null)
-      setAttachments((current) => [...current, ...next])
+      setAttachments((current) => [...current, ...next.attachments])
     }
     if (fileInputRef.current) fileInputRef.current.value = ''
   }
+
+  useEffect(() => {
+    if (assistantRunning || !queuedAssistantTurn) return
+    const next = queuedAssistantTurn
+    setQueuedAssistantTurn(null)
+    void sendAssistant(next.prompt, next.attachments)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [assistantRunning, queuedAssistantTurn])
 
   async function cancelAssistant() {
     if (!activePlan || !assistantRunning) return
@@ -381,7 +386,7 @@ export default function PlanningView({ projectId, repos }: { projectId: number; 
               <Input
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
-                className="h-9 min-w-0 flex-1 max-w-xl bg-transparent border-transparent px-0 text-base font-medium focus:border-transparent"
+                className="h-9 min-w-0 flex-1 bg-transparent border-transparent px-0 text-base font-medium focus:border-transparent"
                 aria-label="Plan title"
               />
               <div className="flex items-center gap-2 shrink-0">
@@ -440,7 +445,7 @@ export default function PlanningView({ projectId, repos }: { projectId: number; 
               ) : (
                 <div className="h-full overflow-y-auto bg-[#0d0d0d] px-10 py-8">
                   {content.trim() ? (
-                    <article className="tb-prose max-w-4xl">
+                    <article className="tb-prose w-full max-w-none">
                       <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
                     </article>
                   ) : (
@@ -537,8 +542,15 @@ export default function PlanningView({ projectId, repos }: { projectId: number; 
             </div>
           )}
         </div>
-        <footer className="p-3 border-t border-border shrink-0">
-          {attachments.length > 0 && (
+        <footer
+          className="p-3 border-t border-border shrink-0"
+          onDrop={(e) => {
+            e.preventDefault()
+            void addAttachments(filesFromDrop(e))
+          }}
+          onDragOver={(e) => e.preventDefault()}
+        >
+          {(attachments.length > 0 || queuedAssistantTurn) && (
             <div className="mb-2 flex flex-wrap gap-1.5">
               {attachments.map((file, index) => (
                 <span
@@ -559,6 +571,11 @@ export default function PlanningView({ projectId, repos }: { projectId: number; 
                   </button>
                 </span>
               ))}
+              {queuedAssistantTurn && (
+                <span className="inline-flex items-center rounded-md border border-accent/40 bg-[#1a1414] px-2 py-1 text-[10px] text-accent">
+                  1 queued message
+                </span>
+              )}
             </div>
           )}
           <div className="flex items-end gap-2">
@@ -573,7 +590,7 @@ export default function PlanningView({ projectId, repos }: { projectId: number; 
               onClick={() => fileInputRef.current?.click()}
               title="Attach files"
               aria-label="Attach files"
-              disabled={!activePlan || assistantRunning}
+              disabled={!activePlan}
               className="no-drag w-9 h-9 rounded-md border border-border bg-panel text-muted hover:text-text hover:bg-[#1d1d1d] flex items-center justify-center transition-colors shrink-0 disabled:opacity-50"
             >
               <Paperclip size={14} />
@@ -582,6 +599,10 @@ export default function PlanningView({ projectId, repos }: { projectId: number; 
               ref={assistantInputRef}
               value={assistantInput}
               onChange={(e) => setAssistantInput(e.target.value)}
+              onPaste={(e) => {
+                const files = filesFromClipboard(e)
+                if (files.length > 0) void addAttachments(files)
+              }}
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
                   e.preventDefault()
@@ -590,21 +611,31 @@ export default function PlanningView({ projectId, repos }: { projectId: number; 
               }}
               placeholder="Ask about this plan... (Shift+Enter for newline)"
               rows={1}
-              disabled={!activePlan || assistantRunning}
+              disabled={!activePlan}
               className="no-drag flex-1 min-w-0 min-h-[36px] max-h-[200px] resize-none rounded-md bg-panel border border-border px-3 py-2 text-sm leading-5 outline-none focus:border-accent placeholder:text-muted disabled:opacity-60"
             />
             <button
               onClick={() => {
-                if (assistantRunning) void cancelAssistant()
-                else void sendAssistant()
+                void sendAssistant()
               }}
-              title={assistantRunning ? 'Stop' : 'Send'}
-              aria-label={assistantRunning ? 'Stop' : 'Send'}
-              disabled={!activePlan}
+              title={assistantRunning ? 'Queue message' : 'Send'}
+              aria-label={assistantRunning ? 'Queue message' : 'Send'}
+              disabled={!activePlan || (!assistantInput.trim() && attachments.length === 0)}
               className="no-drag w-9 h-9 rounded-md border border-accent bg-accent text-black hover:brightness-110 flex items-center justify-center transition-colors shrink-0"
             >
-              {assistantRunning ? <Square size={13} /> : <Send size={14} />}
+              <Send size={14} />
             </button>
+            {assistantRunning && (
+              <button
+                onClick={() => void cancelAssistant()}
+                title="Stop"
+                aria-label="Stop"
+                disabled={!activePlan}
+                className="no-drag w-9 h-9 rounded-md border border-red-900/70 bg-red-950/30 text-red-200 hover:bg-red-950/50 flex items-center justify-center transition-colors shrink-0"
+              >
+                <Square size={13} />
+              </button>
+            )}
           </div>
         </footer>
       </aside>

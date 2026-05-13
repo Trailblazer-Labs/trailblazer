@@ -2,9 +2,10 @@ import fs from 'node:fs'
 import simpleGit from 'simple-git'
 import { EventEmitter } from 'node:events'
 import { getDb } from './db'
-import { getEngine, spawnAgent } from './engine'
+import { spawnAgent } from './engine'
 import { createParser } from './agentParser'
-import { getModel } from './modelPrefs'
+import { resolveProjectAgent } from './projectPrefs'
+import { extractAgentApiError } from './agentErrors'
 import { AGENT_INSTRUCTIONS_FILE_PROMPT } from './agentInstructions'
 import type { ExpandEvent } from '@shared/types'
 
@@ -23,12 +24,13 @@ export async function expandIssue(args: {
   repoId: number
 }): Promise<ExpandedIssue> {
   const repo = getDb()
-    .prepare('SELECT owner, name, local_path FROM repos WHERE id = ?')
-    .get(args.repoId) as { owner: string; name: string; local_path: string } | undefined
+    .prepare('SELECT project_id, owner, name, local_path FROM repos WHERE id = ?')
+    .get(args.repoId) as
+    | { project_id: number; owner: string; name: string; local_path: string }
+    | undefined
   if (!repo) throw new Error('repo not found')
 
-  const engine = getEngine()
-  if (!engine) throw new Error('No engine configured — pick one in Settings')
+  const { engine, model } = resolveProjectAgent(repo.project_id, 'issueExpand')
 
   const cwd = fs.existsSync(repo.local_path) ? repo.local_path : process.cwd()
 
@@ -49,7 +51,6 @@ export async function expandIssue(args: {
   emit({ type: 'start', engine })
   const parser = createParser(engine)
 
-  const model = getModel('issueExpand', engine)
   const { done, getStdout, getStderr } = spawnAgent(
     engine,
     prompt,
@@ -76,6 +77,12 @@ export async function expandIssue(args: {
     const msg = `${engine} exited with code ${code}: ${firstErr.trim()}`
     emit({ type: 'error', message: msg })
     throw new Error(msg)
+  }
+
+  const apiError = extractAgentApiError(stdout)
+  if (apiError) {
+    emit({ type: 'error', message: apiError })
+    throw new Error(apiError)
   }
 
   const text = engine === 'claude' ? extractClaudeResultText(stdout) : extractCodexResultText(stdout)

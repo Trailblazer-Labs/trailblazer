@@ -2,6 +2,10 @@ export interface Project {
   id: number
   name: string
   createdAt: string
+  assistantEngine: Engine | null
+  featureModel: string | null
+  issueExpandModel: string | null
+  issueResolveModel: string | null
 }
 
 export interface Repo {
@@ -47,6 +51,7 @@ export interface PlanPromptAttachment {
   type: string
   size: number
   content: string
+  encoding?: 'text' | 'dataUrl'
 }
 
 export type PlanRunEvent =
@@ -137,7 +142,7 @@ export interface FeatureRepoChanges {
 export interface FeatureCommitResult {
   repoId: number
   repoName: string
-  status: 'committed' | 'clean' | 'failed'
+  status: 'committed' | 'clean' | 'published' | 'failed'
   sha?: string
   filesCommitted?: number
   error?: string
@@ -220,6 +225,17 @@ export interface UpdateStatus {
   percent: number | null
   message: string | null
   checkedAt: string | null
+}
+
+export interface ReleaseGateStatus {
+  currentVersion: string
+  checkedAt: string | null
+  blocked: boolean
+  reason: string | null
+  message: string | null
+  updateUrl: string | null
+  manifestUrl: string | null
+  error: string | null
 }
 
 export type ExpandEvent =

@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Github, Plus, X } from 'lucide-react'
+import { Github, Pencil, Plus, Settings, X } from 'lucide-react'
 import { Button, Card, Input } from '../components/ui'
 import { useApp } from '../stores/app'
 import RepoPicker from '../components/RepoPicker'
 import { Modal } from '../components/NewIssueModal'
 import { FireLogo } from '../components/FireLogo'
 import SettingsModal from '../components/SettingsModal'
+import ProjectAgentSettingsModal from '../components/ProjectAgentSettingsModal'
 import type { Project, Repo, RepoSearchResult } from '@shared/types'
 
 export default function Projects() {
@@ -32,6 +33,8 @@ export default function Projects() {
   }, [projects, repoQueries])
 
   const [creating, setCreating] = useState(false)
+  const [editingProject, setEditingProject] = useState<Project | null>(null)
+  const [settingsProject, setSettingsProject] = useState<Project | null>(null)
   const [showSettings, setShowSettings] = useState(false)
   const [showContributeBanner, setShowContributeBanner] = useState(
     () => localStorage.getItem('trailblazer.contributeBanner.hidden') !== 'true'
@@ -141,6 +144,8 @@ export default function Projects() {
                 project={p}
                 repos={reposByProject.get(p.id) ?? []}
                 onOpen={() => setView({ kind: 'project', projectId: p.id })}
+                onEdit={() => setEditingProject(p)}
+                onSettings={() => setSettingsProject(p)}
                 onDeleted={refresh}
               />
             ))}
@@ -159,6 +164,25 @@ export default function Projects() {
             }}
           />
         </Modal>
+      )}
+      {editingProject && (
+        <Modal onClose={() => setEditingProject(null)}>
+          <EditProjectReposCard
+            project={editingProject}
+            repos={reposByProject.get(editingProject.id) ?? []}
+            onClose={() => setEditingProject(null)}
+            onSaved={() => {
+              setEditingProject(null)
+              refresh()
+            }}
+          />
+        </Modal>
+      )}
+      {settingsProject && (
+        <ProjectAgentSettingsModal
+          project={settingsProject}
+          onClose={() => setSettingsProject(null)}
+        />
       )}
       {showSettings && <SettingsModal onClose={() => setShowSettings(false)} />}
       {showContributeBanner && (
@@ -218,11 +242,15 @@ function ProjectCard({
   project,
   repos,
   onOpen,
+  onEdit,
+  onSettings,
   onDeleted
 }: {
   project: Project
   repos: Repo[]
   onOpen: () => void
+  onEdit: () => void
+  onSettings: () => void
   onDeleted: () => void
 }) {
   const [menu, setMenu] = useState(false)
@@ -250,6 +278,26 @@ function ProjectCard({
             className="absolute right-3 top-12 z-10 bg-bg border border-border rounded-md shadow-lg text-sm"
             onClick={(e) => e.stopPropagation()}
           >
+            <button
+              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-text hover:bg-panel"
+              onClick={() => {
+                setMenu(false)
+                onSettings()
+              }}
+            >
+              <Settings size={13} />
+              Project settings
+            </button>
+            <button
+              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-text hover:bg-panel"
+              onClick={() => {
+                setMenu(false)
+                onEdit()
+              }}
+            >
+              <Pencil size={13} />
+              Edit repositories
+            </button>
             <button
               className="block w-full text-left px-3 py-1.5 text-red-400 hover:bg-panel"
               onClick={async () => {
@@ -281,6 +329,110 @@ function ProjectCard({
         )}
       </div>
     </div>
+  )
+}
+
+function EditProjectReposCard({
+  project,
+  repos,
+  onClose,
+  onSaved
+}: {
+  project: Project
+  repos: Repo[]
+  onClose: () => void
+  onSaved: () => void
+}) {
+  const [picked, setPicked] = useState<RepoSearchResult[]>([])
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const existingFullNames = useMemo(
+    () => repos.map((repo) => `${repo.owner}/${repo.name}`),
+    [repos]
+  )
+  const existing = useMemo(() => new Set(existingFullNames), [existingFullNames])
+  const newRepos = picked.filter((repo) => !existing.has(repo.fullName))
+
+  useEffect(() => {
+    setError(null)
+  }, [picked])
+
+  async function addRepositories() {
+    if (newRepos.length === 0) return
+    setBusy(true)
+    setError(null)
+    try {
+      for (const repo of newRepos) {
+        await window.api.projects.addRepo(project.id, {
+          owner: repo.owner,
+          name: repo.name,
+          defaultBranch: repo.defaultBranch
+        })
+      }
+      onSaved()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'failed to add repositories')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <Card className="w-[640px] max-h-[80vh] overflow-auto p-6 space-y-5">
+      <div>
+        <div className="text-xs uppercase tracking-wider text-muted">Edit project</div>
+        <div className="mt-1 text-lg">{project.name}</div>
+      </div>
+
+      <div>
+        <div className="text-xs uppercase tracking-wider text-muted mb-2">
+          Current repositories
+        </div>
+        {repos.length === 0 ? (
+          <div className="rounded-md border border-border bg-bg px-3 py-2 text-sm text-muted">
+            No repositories yet.
+          </div>
+        ) : (
+          <div className="flex flex-wrap gap-2">
+            {repos.map((repo) => (
+              <span
+                key={repo.id}
+                className="rounded-md border border-border bg-bg px-2 py-1 text-xs text-muted"
+              >
+                <span>{repo.owner}/</span>
+                <span className="text-text">{repo.name}</span>
+              </span>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div>
+        <div className="text-xs uppercase tracking-wider text-muted mb-2">
+          Add repositories
+        </div>
+        <RepoPicker
+          selected={picked}
+          onChange={setPicked}
+          disabledFullNames={existingFullNames}
+        />
+      </div>
+
+      {error && <div className="text-red-400 text-xs">{error}</div>}
+      <div className="flex justify-end gap-2 pt-1">
+        <Button onClick={onClose} disabled={busy}>
+          Cancel
+        </Button>
+        <Button
+          variant="primary"
+          disabled={busy || newRepos.length === 0}
+          onClick={addRepositories}
+        >
+          {busy ? 'Adding...' : 'Add repositories'}
+        </Button>
+      </div>
+    </Card>
   )
 }
 

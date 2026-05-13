@@ -20,6 +20,8 @@ export const IPC = {
   updaterDownload: 'updater:download',
   updaterQuitAndInstall: 'updater:quit-and-install',
   updaterEvent: 'updater:event',
+  releaseGateGet: 'release-gate:get',
+  releaseGateRefresh: 'release-gate:refresh',
   // github
   githubValidatePat: 'github:validate-pat',
   githubSearchRepos: 'github:search-repos',
@@ -35,7 +37,9 @@ export const IPC = {
   githubCloseIssue: 'github:close-issue',
   // projects
   projectsList: 'projects:list',
+  projectsGet: 'projects:get',
   projectsCreate: 'projects:create',
+  projectsUpdateSettings: 'projects:update-settings',
   projectsDelete: 'projects:delete',
   projectsAddRepo: 'projects:add-repo',
   projectsAddTrailblazer: 'projects:add-trailblazer',
@@ -67,6 +71,8 @@ export const IPC = {
   featuresCreatePRs: 'features:create-prs',
   featuresGetChanges: 'features:get-changes',
   featuresCommit: 'features:commit',
+  featuresCommitPublish: 'features:commit-publish',
+  featuresPublish: 'features:publish',
   featuresListSessions: 'features:list-sessions',
   featuresCreateSession: 'features:create-session',
   featuresRenameSession: 'features:rename-session',

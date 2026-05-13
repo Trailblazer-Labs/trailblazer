@@ -107,6 +107,20 @@ function migrate(d: Database.Database) {
     d.exec('ALTER TABLE repos ADD COLUMN working_branch TEXT')
   }
 
+  const projectCols = d.prepare('PRAGMA table_info(projects)').all() as { name: string }[]
+  if (!projectCols.some((c) => c.name === 'assistant_engine')) {
+    d.exec('ALTER TABLE projects ADD COLUMN assistant_engine TEXT')
+  }
+  if (!projectCols.some((c) => c.name === 'feature_model')) {
+    d.exec('ALTER TABLE projects ADD COLUMN feature_model TEXT')
+  }
+  if (!projectCols.some((c) => c.name === 'issue_expand_model')) {
+    d.exec('ALTER TABLE projects ADD COLUMN issue_expand_model TEXT')
+  }
+  if (!projectCols.some((c) => c.name === 'issue_resolve_model')) {
+    d.exec('ALTER TABLE projects ADD COLUMN issue_resolve_model TEXT')
+  }
+
   // ─── feature_sessions: multiple sessions per feature ───────────────────────
   // Older builds stored one row per (feature_id, engine) with a composite PK and only
   // tracked the CLI session id. The new shape gives each session its own id, name,

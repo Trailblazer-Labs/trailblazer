@@ -6,10 +6,12 @@ import type { Repo, Engine, AgentActivity } from '@shared/types'
 type Step = 'brief' | 'preview'
 
 export default function NewIssueModal({
+  projectId,
   repos,
   onClose,
   onCreated
 }: {
+  projectId: number
   repos: Repo[]
   onClose: () => void
   onCreated: (created: {
@@ -38,8 +40,16 @@ export default function NewIssueModal({
   const repo = repos.find((r) => r.id === repoId) ?? null
 
   useEffect(() => {
-    window.api.config.get().then((cfg) => setEngine(cfg.engine))
-  }, [])
+    let cancelled = false
+    Promise.all([window.api.projects.get(projectId), window.api.config.get()]).then(
+      ([project, cfg]) => {
+        if (!cancelled) setEngine(project?.assistantEngine ?? cfg.engine)
+      }
+    )
+    return () => {
+      cancelled = true
+    }
+  }, [projectId])
 
   useEffect(() => {
     const unsub = window.api.github.onExpandEvent((evt) => {

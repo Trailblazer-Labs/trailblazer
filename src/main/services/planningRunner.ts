@@ -3,8 +3,9 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { app } from 'electron'
 import { getDb } from './db'
-import { getEngine, spawnAgent } from './engine'
-import { getModel } from './modelPrefs'
+import { spawnAgent } from './engine'
+import { resolveProjectAgent } from './projectPrefs'
+import { extractAgentApiError } from './agentErrors'
 import { createParser } from './agentParser'
 import { updatePlan } from './plans'
 import type {
@@ -99,11 +100,9 @@ export async function sendPrompt(args: {
   model?: string
 }): Promise<{ assistantMessageId: number }> {
   if (inFlight.has(args.planId)) throw new Error('a planning turn is already in flight')
-  const engine = getEngine()
-  if (!engine) throw new Error('No engine configured — pick one in Settings')
-
   const plan = getPlanContext(args.planId)
   if (!plan) throw new Error('plan not found')
+  const { engine, model } = resolveProjectAgent(plan.projectId, 'feature', args.model)
 
   const prompt = args.prompt.trim()
   if (!prompt) throw new Error('prompt cannot be empty')
@@ -137,7 +136,6 @@ export async function sendPrompt(args: {
   emit({ type: 'start', planId: args.planId, engine, userMessageId })
   inFlight.set(args.planId, {})
 
-  const model = args.model || getModel('feature', engine)
   const { proc, done, getStdout, getStderr } = spawnAgent(
     engine,
     agentPrompt,
@@ -154,6 +152,7 @@ export async function sendPrompt(args: {
   inFlight.get(args.planId)!.proc = proc
 
   const code = await done
+  const stdout = getStdout()
   const ctx = inFlight.get(args.planId)
   inFlight.delete(args.planId)
 
@@ -165,7 +164,6 @@ export async function sendPrompt(args: {
 
   if (code !== 0) {
     const stderr = getStderr()
-    const stdout = getStdout()
     // eslint-disable-next-line no-console
     console.error(`[planning ${args.planId}] ${engine} stderr:`, stderr)
     // eslint-disable-next-line no-console
@@ -177,7 +175,14 @@ export async function sendPrompt(args: {
     return { assistantMessageId }
   }
 
-  const finalText = extractFinalText(engine, getStdout(), activities)
+  const apiError = extractAgentApiError(stdout)
+  if (apiError) {
+    updateAssistantMessage(assistantMessageId, apiError, activities)
+    emit({ type: 'error', planId: args.planId, message: apiError })
+    return { assistantMessageId }
+  }
+
+  const finalText = extractFinalText(engine, stdout, activities)
   updateAssistantMessage(assistantMessageId, finalText, activities)
 
   try {
@@ -368,7 +373,7 @@ function writeAttachments(root: string, attachments: PlanPromptAttachment[]): Pr
   return attachments.map((file, index) => {
     const safeName = safeFileName(file.name) || `attachment-${index + 1}.txt`
     const relativePath = path.posix.join('attachments', `${index + 1}-${safeName}`)
-    fs.writeFileSync(path.join(root, relativePath), file.content)
+    fs.writeFileSync(path.join(root, relativePath), attachmentBytes(file))
     const inlineLimit = 120_000
     const inlineContent =
       file.content.length <= inlineLimit ? file.content : file.content.slice(0, inlineLimit)
@@ -379,6 +384,13 @@ function writeAttachments(root: string, attachments: PlanPromptAttachment[]): Pr
       truncatedChars: Math.max(0, file.content.length - inlineContent.length)
     }
   })
+}
+
+function attachmentBytes(file: PlanPromptAttachment): Buffer | string {
+  if (file.encoding !== 'dataUrl') return file.content
+  const match = file.content.match(/^data:[^;]+;base64,(.+)$/)
+  if (!match) return file.content
+  return Buffer.from(match[1], 'base64')
 }
 
 function safeFileName(name: string): string {

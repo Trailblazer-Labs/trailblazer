@@ -4,21 +4,24 @@ import { Button } from '../components/ui'
 import { useApp } from '../stores/app'
 import { applyActivity } from '../components/ActivityList'
 import ChatActivityStream from '../components/ChatActivityStream'
+import { filesFromClipboard, filesFromDrop, filesToPromptAttachments } from '../lib/chatAttachments'
 import PRResultsModal from '../components/PRResultsModal'
 import FeatureSwitcher, { useFeatureSwitcherCollapsed } from '../components/FeatureSwitcher'
 import FeatureChangesPanel from '../components/FeatureChangesPanel'
+import { Paperclip, X } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { defaultModelFor, mergedModels } from '@shared/models'
 import type {
   AgentActivity,
-  AppConfig,
   Engine,
   Feature,
   FeatureMessage,
   FeatureRepo,
   FeatureSession,
+  PlanPromptAttachment,
   PRCreateResult,
+  Project,
   Repo
 } from '@shared/types'
 
@@ -45,6 +48,12 @@ export default function FeatureChatView({
   const setView = useApp((s) => s.setView)
   const qc = useQueryClient()
   const [draft, setDraft] = useState(initialDraft ?? '')
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const [attachments, setAttachments] = useState<PlanPromptAttachment[]>([])
+  const [queuedTurn, setQueuedTurn] = useState<{
+    prompt: string
+    attachments: PlanPromptAttachment[]
+  } | null>(null)
   const [running, setRunning] = useState(false)
   const [runStartedAt, setRunStartedAt] = useState<number | null>(null)
   const [lastActivityAt, setLastActivityAt] = useState<number | null>(null)
@@ -169,16 +178,34 @@ export default function FeatureChatView({
     return () => unsub()
   }, [featureId, resolvedSessionId, qc])
 
-  async function send() {
-    if (!draft.trim() || running) return
-    const prompt = draft.trim()
+  async function addAttachments(files: FileList | File[] | null) {
+    if (!files || files.length === 0) return
+    const next = await filesToPromptAttachments(files)
+    if (next.errors.length > 0) setError(next.errors.join('\n'))
+    if (next.attachments.length > 0) {
+      setAttachments((current) => [...current, ...next.attachments])
+    }
+    if (fileInputRef.current) fileInputRef.current.value = ''
+  }
+
+  async function send(text = draft, files = attachments) {
+    const prompt = text.trim() || (files.length > 0 ? 'Review the attached files.' : '')
+    if (!prompt) return
+    if (running) {
+      setQueuedTurn({ prompt, attachments: files })
+      setDraft('')
+      setAttachments([])
+      return
+    }
     setDraft('')
+    setAttachments([])
     setError(null)
     try {
       await window.api.features.sendPrompt({
         featureId,
         sessionId: resolvedSessionId,
         prompt,
+        attachments: files,
         model: model ?? undefined
       })
     } catch (e) {
@@ -186,6 +213,14 @@ export default function FeatureChatView({
       setRunning(false)
     }
   }
+
+  useEffect(() => {
+    if (running || !queuedTurn) return
+    const next = queuedTurn
+    setQueuedTurn(null)
+    void send(next.prompt, next.attachments)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [running, queuedTurn])
 
   async function cancel() {
     await window.api.features.cancelTurn(featureId)
@@ -207,22 +242,20 @@ export default function FeatureChatView({
   const [switcherCollapsed, setSwitcherCollapsed] = useFeatureSwitcherCollapsed()
   void perRepoSummary
 
-  const { data: config } = useQuery<AppConfig>({
+  const { data: project } = useQuery<Project | null>({
+    queryKey: ['project', projectId],
+    queryFn: () => window.api.projects.get(projectId)
+  })
+  const { data: config } = useQuery({
     queryKey: ['app-config'],
     queryFn: () => window.api.config.get()
   })
-  const engine: Engine | null = config?.engine ?? null
+  const engine: Engine | null = project?.assistantEngine ?? config?.engine ?? null
   const [model, setModelState] = useState<string | null>(null)
   useEffect(() => {
     if (!engine) return
-    let cancelled = false
-    window.api.config.getModel('feature', engine).then((m) => {
-      if (!cancelled) setModelState(m || defaultModelFor(engine))
-    })
-    return () => {
-      cancelled = true
-    }
-  }, [engine])
+    setModelState(project?.featureModel || defaultModelFor(engine))
+  }, [engine, project?.featureModel])
 
   return (
     <div className="h-full flex overflow-hidden">
@@ -320,20 +353,60 @@ export default function FeatureChatView({
 
         <div className="border-t border-border p-3">
           <div className="max-w-3xl mx-auto">
-            <div className="rounded-lg border border-border bg-panel focus-within:border-accent transition-colors">
+            <div
+              className="rounded-lg border border-border bg-panel focus-within:border-accent transition-colors"
+              onDrop={(e) => {
+                e.preventDefault()
+                void addAttachments(filesFromDrop(e))
+              }}
+              onDragOver={(e) => e.preventDefault()}
+            >
+              {(attachments.length > 0 || queuedTurn) && (
+                <div className="flex flex-wrap gap-1.5 border-b border-border/60 px-3 py-2">
+                  {attachments.map((file, index) => (
+                    <span
+                      key={`${file.name}-${index}`}
+                      className="inline-flex max-w-full items-center gap-1.5 rounded-md border border-border bg-bg px-2 py-1 text-[10px] text-muted"
+                    >
+                      <Paperclip size={11} className="shrink-0" />
+                      <span className="truncate max-w-[220px]">{file.name}</span>
+                      <button
+                        onClick={() => setAttachments((current) => current.filter((_, i) => i !== index))}
+                        title="Remove attachment"
+                        aria-label="Remove attachment"
+                        className="no-drag text-muted hover:text-text"
+                      >
+                        <X size={11} />
+                      </button>
+                    </span>
+                  ))}
+                  {queuedTurn && (
+                    <span className="rounded-md border border-accent/40 bg-[#1a1414] px-2 py-1 text-[10px] text-accent">
+                      1 queued message
+                    </span>
+                  )}
+                </div>
+              )}
               <textarea
                 value={draft}
                 onChange={(e) => setDraft(e.target.value)}
+                onPaste={(e) => {
+                  const files = filesFromClipboard(e)
+                  if (files.length > 0) void addAttachments(files)
+                }}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
                     e.preventDefault()
                     void send()
                   }
                 }}
-                placeholder="Tell the agent what to build…  ⌘↵ to send"
-                disabled={running}
+                placeholder={
+                  running
+                    ? 'Queue the next instruction while the agent works...  ⌘↵ to queue'
+                    : 'Tell the agent what to build…  ⌘↵ to send'
+                }
                 rows={3}
-                className="no-drag w-full bg-transparent text-sm outline-none resize-none p-3 placeholder:text-muted font-mono leading-relaxed disabled:opacity-60"
+                className="no-drag w-full bg-transparent text-sm outline-none resize-none p-3 placeholder:text-muted font-mono leading-relaxed"
               />
               <div className="flex items-center justify-between gap-3 px-3 py-2 border-t border-border/60">
                 <div className="flex items-center gap-2 min-w-0 flex-1">
@@ -345,17 +418,37 @@ export default function FeatureChatView({
                       onChange={(v) => setModelState(v)}
                     />
                   )}
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    multiple
+                    className="hidden"
+                    onChange={(e) => void addAttachments(e.target.files)}
+                  />
+                  <button
+                    onClick={() => fileInputRef.current?.click()}
+                    title="Attach files"
+                    aria-label="Attach files"
+                    className="no-drag h-7 w-7 rounded-md border border-border bg-bg text-muted hover:text-text flex items-center justify-center"
+                  >
+                    <Paperclip size={13} />
+                  </button>
                   <div className="text-[11px] text-muted truncate">
-                    {running ? 'Agent working — input disabled.' : 'Sessions preserve prior turns.'}
+                    {running ? 'Agent working — next message will queue.' : 'Sessions preserve prior turns.'}
                   </div>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
                   {running ? (
-                    <Button variant="danger" onClick={cancel}>
-                      Cancel
-                    </Button>
+                    <>
+                      <Button disabled={!draft.trim() && attachments.length === 0} onClick={() => send()}>
+                        Queue
+                      </Button>
+                      <Button variant="danger" onClick={cancel}>
+                        Cancel
+                      </Button>
+                    </>
                   ) : (
-                    <Button variant="primary" disabled={!draft.trim()} onClick={send}>
+                    <Button variant="primary" disabled={!draft.trim() && attachments.length === 0} onClick={() => send()}>
                       Send ⌘↵
                     </Button>
                   )}
