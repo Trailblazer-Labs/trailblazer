@@ -34,15 +34,17 @@ type RepoSummary = {
 export default function FeatureChatView({
   projectId,
   featureId,
-  sessionId
+  sessionId,
+  initialDraft
 }: {
   projectId: number
   featureId: number
   sessionId?: number
+  initialDraft?: string
 }) {
   const setView = useApp((s) => s.setView)
   const qc = useQueryClient()
-  const [draft, setDraft] = useState('')
+  const [draft, setDraft] = useState(initialDraft ?? '')
   const [running, setRunning] = useState(false)
   const [runStartedAt, setRunStartedAt] = useState<number | null>(null)
   const [lastActivityAt, setLastActivityAt] = useState<number | null>(null)
@@ -57,6 +59,10 @@ export default function FeatureChatView({
   const [error, setError] = useState<string | null>(null)
   const [prResults, setPrResults] = useState<PRCreateResult[] | null>(null)
   const [creatingPRs, setCreatingPRs] = useState(false)
+
+  useEffect(() => {
+    if (initialDraft) setDraft(initialDraft)
+  }, [featureId, initialDraft, sessionId])
 
   const { data: feature } = useQuery<Feature | null>({
     queryKey: ['feature', featureId],

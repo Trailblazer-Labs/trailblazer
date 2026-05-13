@@ -1,12 +1,13 @@
 import { type ReactNode, useEffect, useMemo, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Code2, Eye, FileText, Lightbulb, Plus, Send, Sparkles, Square, Trash2 } from 'lucide-react'
+import { Code2, Eye, FileText, GitBranch, Lightbulb, Plus, Send, Sparkles, Square, Trash2 } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { Button, Input } from '../components/ui'
 import ActivityList, { applyActivity } from '../components/ActivityList'
 import { cn } from '../lib/cn'
-import type { AgentActivity, Engine, Plan, PlanMessage } from '@shared/types'
+import { useApp } from '../stores/app'
+import type { AgentActivity, Engine, Plan, PlanMessage, Repo } from '@shared/types'
 
 const promptChips = [
   'Find the gaps in this plan',
@@ -15,8 +16,9 @@ const promptChips = [
   'Draft acceptance criteria'
 ]
 
-export default function PlanningView({ projectId }: { projectId: number }) {
+export default function PlanningView({ projectId, repos }: { projectId: number; repos: Repo[] }) {
   const qc = useQueryClient()
+  const setView = useApp((s) => s.setView)
   const [activePlanId, setActivePlanId] = useState<number | null>(null)
   const [title, setTitle] = useState('')
   const [content, setContent] = useState('')
@@ -27,6 +29,7 @@ export default function PlanningView({ projectId }: { projectId: number }) {
   const [assistantEngine, setAssistantEngine] = useState<Engine | null>(null)
   const [assistantError, setAssistantError] = useState<string | null>(null)
   const [liveActivities, setLiveActivities] = useState<AgentActivity[]>([])
+  const [converting, setConverting] = useState(false)
 
   const { data: plans = [] } = useQuery({
     queryKey: ['plans', projectId],
@@ -124,6 +127,53 @@ export default function PlanningView({ projectId }: { projectId: number }) {
   async function cancelAssistant() {
     if (!activePlan || !assistantRunning) return
     await window.api.plans.cancelPrompt(activePlan.id)
+  }
+
+  async function turnIntoFeature() {
+    if (!activePlan || converting) return
+    let featureName = title.trim()
+    if (/^Plan \d+$/i.test(featureName) || featureName === 'Untitled plan') {
+      const named = window.prompt('Name this feature', '')
+      if (named === null) return
+      featureName = named.trim()
+    }
+    if (!featureName) return
+    if (repos.length === 0) {
+      setAssistantError('Add at least one repo to this project before creating a feature.')
+      return
+    }
+    const previousTitle = title.trim()
+    const featureContent =
+      previousTitle && previousTitle !== featureName && content.startsWith(`# ${previousTitle}`)
+        ? content.replace(`# ${previousTitle}`, `# ${featureName}`)
+        : content
+    if (previousTitle !== featureName) {
+      setTitle(featureName)
+      setContent(featureContent)
+    }
+    setConverting(true)
+    setAssistantError(null)
+    try {
+      const result = await window.api.plans.createFeature({
+        planId: activePlan.id,
+        name: featureName,
+        content: featureContent,
+        repoIds: repos.map((repo) => repo.id)
+      })
+      void qc.invalidateQueries({ queryKey: ['plans', projectId] })
+      void qc.invalidateQueries({ queryKey: ['features', projectId] })
+      setView({
+        kind: 'feature',
+        projectId,
+        featureId: result.feature.id,
+        sessionId: result.session.id,
+        initialDraft: `Implement ${result.planFile}`
+      })
+    } catch (e) {
+      setAssistantError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setConverting(false)
+    }
   }
 
   useEffect(() => {
@@ -241,6 +291,15 @@ export default function PlanningView({ projectId }: { projectId: number }) {
                 <span className="text-[10px] uppercase tracking-wider text-muted">
                   {saveState === 'saving' ? 'Saving' : saveState === 'saved' ? 'Saved' : 'Local'}
                 </span>
+                <Button
+                  variant="primary"
+                  className="h-8"
+                  onClick={turnIntoFeature}
+                  disabled={!activePlan || converting}
+                >
+                  <GitBranch size={14} />
+                  {converting ? 'Creating...' : 'Turn plan into feature'}
+                </Button>
                 <button
                   onClick={() => deletePlan(activePlan)}
                   title="Delete plan"

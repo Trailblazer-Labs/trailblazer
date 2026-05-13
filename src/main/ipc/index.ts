@@ -290,6 +290,13 @@ export function registerIpc(win: BrowserWindow) {
     plans.deletePlan(planId)
     return { ok: true }
   })
+  ipcMain.handle(
+    IPC.plansCreateFeature,
+    (
+      _e,
+      args: { planId: number; name: string; content: string; repoIds: number[] }
+    ) => plans.createFeatureFromPlan(args)
+  )
   ipcMain.handle(IPC.plansListMessages, (_e, planId: number) =>
     planningRunner.listMessages(planId)
   )

@@ -1,5 +1,8 @@
 import { getDb } from './db'
-import type { Plan } from '@shared/types'
+import fs from 'node:fs'
+import path from 'node:path'
+import { createFeature, createSession } from './features'
+import type { Plan, PlanFeatureResult } from '@shared/types'
 
 type PlanRow = {
   id: number
@@ -88,4 +91,29 @@ export function updatePlan(
 
 export function deletePlan(planId: number) {
   getDb().prepare('DELETE FROM plans WHERE id = ?').run(planId)
+}
+
+export async function createFeatureFromPlan(args: {
+  planId: number
+  name: string
+  content: string
+  repoIds: number[]
+}): Promise<PlanFeatureResult> {
+  const plan = getPlan(args.planId)
+  if (!plan) throw new Error('Plan not found')
+  const name = args.name.trim()
+  if (!name) throw new Error('Feature name is required')
+  if (args.repoIds.length === 0) throw new Error('Pick at least one repo')
+
+  updatePlan(args.planId, { title: name, content: args.content })
+  const { feature, featureRepos } = await createFeature({
+    projectId: plan.projectId,
+    name,
+    repoIds: args.repoIds
+  })
+
+  const planFile = 'plan.md'
+  fs.writeFileSync(path.join(feature.workspacePath, planFile), args.content.trimEnd() + '\n')
+  const session = createSession(feature.id, 'Plan implementation')
+  return { feature, featureRepos, session, planFile }
 }

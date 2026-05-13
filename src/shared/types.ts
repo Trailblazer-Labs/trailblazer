@@ -70,6 +70,13 @@ export interface FeatureSession {
   lastUsedAt: string | null
 }
 
+export interface PlanFeatureResult {
+  feature: Feature
+  featureRepos: FeatureRepo[]
+  session: FeatureSession
+  planFile: string
+}
+
 export interface FeatureMessage {
   id: number
   featureId: number

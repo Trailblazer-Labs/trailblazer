@@ -208,7 +208,7 @@ export default function ProjectView({ projectId }: { projectId: number }) {
 
         {tab === 'planning' && (
           <div className="flex-1 min-h-0 overflow-hidden">
-            <PlanningView projectId={projectId} />
+            <PlanningView projectId={projectId} repos={repos} />
           </div>
         )}
 

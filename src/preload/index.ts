@@ -15,6 +15,7 @@ import type {
   FeatureSession,
   GhAuthEvent,
   Plan,
+  PlanFeatureResult,
   PlanMessage,
   PlanRunEvent,
   PRCreateResult,
@@ -163,6 +164,12 @@ const api = {
     update: (planId: number, patch: { title?: string; content?: string }): Promise<Plan> =>
       ipcRenderer.invoke(IPC.plansUpdate, planId, patch),
     delete: (planId: number): Promise<{ ok: true }> => ipcRenderer.invoke(IPC.plansDelete, planId),
+    createFeature: (args: {
+      planId: number
+      name: string
+      content: string
+      repoIds: number[]
+    }): Promise<PlanFeatureResult> => ipcRenderer.invoke(IPC.plansCreateFeature, args),
     listMessages: (planId: number): Promise<PlanMessage[]> =>
       ipcRenderer.invoke(IPC.plansListMessages, planId),
     sendPrompt: (args: {

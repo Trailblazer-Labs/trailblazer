@@ -47,6 +47,7 @@ export const IPC = {
   plansCreate: 'plans:create',
   plansUpdate: 'plans:update',
   plansDelete: 'plans:delete',
+  plansCreateFeature: 'plans:create-feature',
   plansListMessages: 'plans:list-messages',
   plansSendPrompt: 'plans:send-prompt',
   plansCancelPrompt: 'plans:cancel-prompt',

@@ -44,6 +44,7 @@ export default function App() {
             projectId={view.projectId}
             featureId={view.featureId}
             sessionId={view.sessionId}
+            initialDraft={view.initialDraft}
           />
         )}
       </div>
