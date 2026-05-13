@@ -238,6 +238,18 @@ export default function PlanningView({ projectId, repos }: { projectId: number; 
         void qc.invalidateQueries({ queryKey: ['plan-messages', activePlanId] })
       } else if (evt.type === 'activity') {
         setLiveActivities((current) => applyActivity(current, evt.activity))
+      } else if (evt.type === 'plan-updated') {
+        setContent(evt.content)
+        setSaveState('saved')
+        qc.setQueryData<Plan[]>(['plans', projectId], (current) =>
+          current
+            ? current.map((plan) =>
+                plan.id === evt.planId
+                  ? { ...plan, content: evt.content, updatedAt: new Date().toISOString() }
+                  : plan
+              )
+            : current
+        )
       } else if (evt.type === 'done') {
         setAssistantRunning(false)
         void qc.invalidateQueries({ queryKey: ['plan-messages', activePlanId] })

@@ -52,6 +52,7 @@ export interface PlanPromptAttachment {
 export type PlanRunEvent =
   | { type: 'start'; planId: number; engine: Engine; userMessageId: number }
   | { type: 'activity'; planId: number; activity: AgentActivity }
+  | { type: 'plan-updated'; planId: number; content: string }
   | { type: 'done'; planId: number; assistantMessageId: number }
   | { type: 'error'; planId: number; message: string }
 

@@ -6,6 +6,7 @@ import { getDb } from './db'
 import { getEngine, spawnAgent } from './engine'
 import { getModel } from './modelPrefs'
 import { createParser } from './agentParser'
+import { updatePlan } from './plans'
 import type {
   AgentActivity,
   Engine,
@@ -13,6 +14,8 @@ import type {
   PlanPromptAttachment,
   PlanRunEvent
 } from '@shared/types'
+
+const PLAN_FILE = 'PLAN.md'
 
 type PreparedAttachment = PlanPromptAttachment & {
   relativePath: string
@@ -117,13 +120,16 @@ export async function sendPrompt(args: {
   const activities: AgentActivity[] = []
   const parser = createParser(engine)
   const cwd = prepareProjectContextWorkspace(plan.projectId)
+  const planFilePath = path.join(cwd, PLAN_FILE)
+  const initialPlanContent = (args.planContent ?? '').trimEnd() + '\n'
+  fs.writeFileSync(planFilePath, initialPlanContent)
   const preparedAttachments = writeAttachments(cwd, attachments)
   const agentPrompt = buildPrompt({
     userPrompt: prompt,
     projectId: plan.projectId,
     planId: args.planId,
     planTitle: args.planTitle,
-    planContent: args.planContent,
+    planFile: PLAN_FILE,
     attachments: preparedAttachments,
     previousMessages
   })
@@ -135,7 +141,7 @@ export async function sendPrompt(args: {
   const { proc, done, getStdout, getStderr } = spawnAgent(
     engine,
     agentPrompt,
-    'read',
+    'write',
     cwd,
     (stream, chunk) => {
       for (const activity of parser.feed(stream, chunk)) {
@@ -173,8 +179,25 @@ export async function sendPrompt(args: {
 
   const finalText = extractFinalText(engine, getStdout(), activities)
   updateAssistantMessage(assistantMessageId, finalText, activities)
+
+  try {
+    const updatedRaw = fs.readFileSync(planFilePath, 'utf8')
+    if (normalizePlan(updatedRaw) !== normalizePlan(initialPlanContent)) {
+      const next = updatedRaw.replace(/\s+$/, '') + '\n'
+      updatePlan(args.planId, { content: next })
+      emit({ type: 'plan-updated', planId: args.planId, content: next })
+    }
+  } catch (e) {
+    // eslint-disable-next-line no-console
+    console.warn(`[planning ${args.planId}] failed to read updated plan:`, e)
+  }
+
   emit({ type: 'done', planId: args.planId, assistantMessageId })
   return { assistantMessageId }
+}
+
+function normalizePlan(value: string): string {
+  return value.replace(/\r\n/g, '\n').replace(/\s+$/, '')
 }
 
 function getPlanContext(planId: number): { projectId: number } | null {
@@ -261,7 +284,7 @@ function buildPrompt({
   projectId,
   planId,
   planTitle,
-  planContent,
+  planFile,
   attachments,
   previousMessages
 }: {
@@ -269,7 +292,7 @@ function buildPrompt({
   projectId: number
   planId: number
   planTitle: string
-  planContent: string
+  planFile: string
   attachments: PreparedAttachment[]
   previousMessages: PlanMessage[]
 }) {
@@ -290,12 +313,14 @@ function buildPrompt({
   return [
     'You are the planning assistant inside Trailblazer.',
     'Help the user plan software features before implementation starts.',
-    'You may inspect the linked repositories for context, but you must not modify files.',
+    `The current plan is stored in \`${planFile}\` in the working directory. It is the source of truth for this plan document — the user sees its contents in their editor.`,
+    `To change the plan, edit \`${planFile}\` directly using your file-editing tools. Do not paste the full updated document into your chat reply; the user does NOT copy from chat.`,
+    'You may also inspect the linked repositories under `repos/` for context, but you must NOT modify any files inside `repos/` — those are real working clones.',
     '',
     `Current Trailblazer project: ${project?.name ?? `Project ${projectId}`}`,
     `Current plan: ${planTitle || 'Untitled plan'} (id ${planId})`,
     '',
-    'Repository context:',
+    'Repository context (read-only):',
     ...repos.map(
       (repo) =>
         `- ${repo.owner}/${repo.name}: repos/${repo.owner}--${repo.name} (default: ${repo.defaultBranch}, working: ${repo.workingBranch || repo.defaultBranch}, local path: ${repo.localPath})`
@@ -306,11 +331,6 @@ function buildPrompt({
       ? otherPlans.map((plan) => `- ${plan.title} (id ${plan.id}, updated ${plan.updated_at})`)
       : ['- None']),
     '',
-    'Current plan markdown:',
-    '```md',
-    planContent || '',
-    '```',
-    '',
     'Attached files for this user request:',
     ...(attachments.length > 0 ? renderAttachments(attachments) : ['- None']),
     '',
@@ -319,11 +339,12 @@ function buildPrompt({
       ? previousMessages.map((message) => `${message.role}: ${message.content}`)
       : ['No prior messages.']),
     '',
-    'Response rules:',
-    '- Return markdown only.',
-    '- Be concrete and planning-oriented: workflows, milestones, risks, acceptance criteria, and open questions.',
-    '- Cite real repository paths when you inspect code.',
-    '- Do not claim you changed the plan or code; the user decides what to copy into the document.',
+    'How to respond:',
+    `1. Read \`${planFile}\` to see the current plan.`,
+    `2. If the user is asking you to change the plan, edit \`${planFile}\` in place (insert sections, rewrite sentences, add bullets, etc.). Preserve the user's existing structure and voice unless they ask you to rework it.`,
+    '3. In your chat reply, briefly summarize what you changed (a few bullets) — or if no edit is needed, answer the question in markdown.',
+    '4. Be concrete and planning-oriented: workflows, milestones, risks, acceptance criteria, open questions. Cite real repository paths when you inspect code.',
+    `5. NEVER reply with the full new plan as a markdown block; the chat is for short summaries, the document is \`${planFile}\`.`,
     '',
     'User request:',
     userPrompt
