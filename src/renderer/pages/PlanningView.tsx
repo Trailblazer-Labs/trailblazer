@@ -1,13 +1,33 @@
-import { type ReactNode, useEffect, useMemo, useState } from 'react'
+import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Code2, Eye, FileText, GitBranch, Lightbulb, Plus, Send, Sparkles, Square, Trash2 } from 'lucide-react'
+import {
+  Code2,
+  Eye,
+  FileText,
+  GitBranch,
+  Lightbulb,
+  Paperclip,
+  Plus,
+  Send,
+  Sparkles,
+  Square,
+  Trash2,
+  X
+} from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { Button, Input } from '../components/ui'
 import ActivityList, { applyActivity } from '../components/ActivityList'
 import { cn } from '../lib/cn'
 import { useApp } from '../stores/app'
-import type { AgentActivity, Engine, Plan, PlanMessage, Repo } from '@shared/types'
+import type {
+  AgentActivity,
+  Engine,
+  Plan,
+  PlanMessage,
+  PlanPromptAttachment,
+  Repo
+} from '@shared/types'
 
 const promptChips = [
   'Find the gaps in this plan',
@@ -19,6 +39,7 @@ const promptChips = [
 export default function PlanningView({ projectId, repos }: { projectId: number; repos: Repo[] }) {
   const qc = useQueryClient()
   const setView = useApp((s) => s.setView)
+  const fileInputRef = useRef<HTMLInputElement>(null)
   const [activePlanId, setActivePlanId] = useState<number | null>(null)
   const [title, setTitle] = useState('')
   const [content, setContent] = useState('')
@@ -30,6 +51,7 @@ export default function PlanningView({ projectId, repos }: { projectId: number; 
   const [assistantError, setAssistantError] = useState<string | null>(null)
   const [liveActivities, setLiveActivities] = useState<AgentActivity[]>([])
   const [converting, setConverting] = useState(false)
+  const [attachments, setAttachments] = useState<PlanPromptAttachment[]>([])
 
   const { data: plans = [] } = useQuery({
     queryKey: ['plans', projectId],
@@ -107,21 +129,49 @@ export default function PlanningView({ projectId, repos }: { projectId: number; 
   }
 
   async function sendAssistant(text = assistantInput) {
-    const prompt = text.trim()
+    const prompt = text.trim() || (attachments.length > 0 ? 'Review the attached files.' : '')
     if (!prompt || !activePlan || assistantRunning) return
     setAssistantInput('')
     setAssistantError(null)
+    const files = attachments
+    setAttachments([])
     try {
       await window.api.plans.sendPrompt({
         planId: activePlan.id,
         prompt,
         planTitle: title,
-        planContent: content
+        planContent: content,
+        attachments: files
       })
     } catch (e) {
       setAssistantRunning(false)
       setAssistantError(e instanceof Error ? e.message : String(e))
+      setAttachments(files)
     }
+  }
+
+  async function addAttachments(files: FileList | null) {
+    if (!files || files.length === 0) return
+    const maxBytes = 250_000
+    const next: PlanPromptAttachment[] = []
+    for (const file of Array.from(files)) {
+      if (file.size > maxBytes) {
+        setAssistantError(`${file.name} is too large. Attach files under 250 KB.`)
+        continue
+      }
+      const content = await file.text()
+      next.push({
+        name: file.name,
+        type: file.type,
+        size: file.size,
+        content
+      })
+    }
+    if (next.length > 0) {
+      setAssistantError(null)
+      setAttachments((current) => [...current, ...next])
+    }
+    if (fileInputRef.current) fileInputRef.current.value = ''
   }
 
   async function cancelAssistant() {
@@ -410,7 +460,46 @@ export default function PlanningView({ projectId, repos }: { projectId: number; 
           )}
         </div>
         <footer className="p-3 border-t border-border shrink-0">
+          {attachments.length > 0 && (
+            <div className="mb-2 flex flex-wrap gap-1.5">
+              {attachments.map((file, index) => (
+                <span
+                  key={`${file.name}-${index}`}
+                  className="inline-flex items-center gap-1.5 rounded-md border border-border bg-panel px-2 py-1 text-[10px] text-muted max-w-full"
+                >
+                  <Paperclip size={11} className="shrink-0" />
+                  <span className="truncate max-w-[220px]">{file.name}</span>
+                  <button
+                    onClick={() =>
+                      setAttachments((current) => current.filter((_, i) => i !== index))
+                    }
+                    title="Remove attachment"
+                    aria-label="Remove attachment"
+                    className="no-drag text-muted hover:text-text"
+                  >
+                    <X size={11} />
+                  </button>
+                </span>
+              ))}
+            </div>
+          )}
           <div className="flex items-center gap-2">
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              className="hidden"
+              onChange={(e) => void addAttachments(e.target.files)}
+            />
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              title="Attach files"
+              aria-label="Attach files"
+              disabled={!activePlan || assistantRunning}
+              className="no-drag w-9 h-9 rounded-md border border-border bg-panel text-muted hover:text-text hover:bg-[#1d1d1d] flex items-center justify-center transition-colors shrink-0 disabled:opacity-50"
+            >
+              <Paperclip size={14} />
+            </button>
             <Input
               value={assistantInput}
               onChange={(e) => setAssistantInput(e.target.value)}

@@ -42,6 +42,13 @@ export interface PlanMessage {
   ts: string
 }
 
+export interface PlanPromptAttachment {
+  name: string
+  type: string
+  size: number
+  content: string
+}
+
 export type PlanRunEvent =
   | { type: 'start'; planId: number; engine: Engine; userMessageId: number }
   | { type: 'activity'; planId: number; activity: AgentActivity }

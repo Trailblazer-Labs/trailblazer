@@ -6,7 +6,13 @@ import { getDb } from './db'
 import { getEngine, spawnAgent } from './engine'
 import { getModel } from './modelPrefs'
 import { createParser } from './agentParser'
-import type { AgentActivity, Engine, PlanMessage, PlanRunEvent } from '@shared/types'
+import type {
+  AgentActivity,
+  Engine,
+  PlanMessage,
+  PlanPromptAttachment,
+  PlanRunEvent
+} from '@shared/types'
 
 export const planBus = new EventEmitter()
 
@@ -80,6 +86,7 @@ export async function sendPrompt(args: {
   prompt: string
   planTitle: string
   planContent: string
+  attachments?: PlanPromptAttachment[]
   model?: string
 }): Promise<{ assistantMessageId: number }> {
   if (inFlight.has(args.planId)) throw new Error('a planning turn is already in flight')
@@ -92,8 +99,14 @@ export async function sendPrompt(args: {
   const prompt = args.prompt.trim()
   if (!prompt) throw new Error('prompt cannot be empty')
 
+  const attachments = sanitizeAttachments(args.attachments ?? [])
   const previousMessages = listMessages(args.planId).slice(-10)
-  const userMessageId = insertMessage(args.planId, 'user', prompt)
+  const attachmentSummary = attachmentMessageSummary(attachments)
+  const userMessageId = insertMessage(
+    args.planId,
+    'user',
+    attachmentSummary ? `${prompt}\n\n${attachmentSummary}` : prompt
+  )
   const assistantMessageId = insertMessage(args.planId, 'assistant', '', [])
   const activities: AgentActivity[] = []
   const parser = createParser(engine)
@@ -104,6 +117,7 @@ export async function sendPrompt(args: {
     planId: args.planId,
     planTitle: args.planTitle,
     planContent: args.planContent,
+    attachments,
     previousMessages
   })
 
@@ -241,6 +255,7 @@ function buildPrompt({
   planId,
   planTitle,
   planContent,
+  attachments,
   previousMessages
 }: {
   userPrompt: string
@@ -248,6 +263,7 @@ function buildPrompt({
   planId: number
   planTitle: string
   planContent: string
+  attachments: PlanPromptAttachment[]
   previousMessages: PlanMessage[]
 }) {
   const repos = getProjectRepos(projectId)
@@ -288,6 +304,9 @@ function buildPrompt({
     planContent || '',
     '```',
     '',
+    'Attached files for this user request:',
+    ...(attachments.length > 0 ? renderAttachments(attachments) : ['- None']),
+    '',
     'Recent planning chat:',
     ...(previousMessages.length
       ? previousMessages.map((message) => `${message.role}: ${message.content}`)
@@ -302,6 +321,39 @@ function buildPrompt({
     'User request:',
     userPrompt
   ].join('\n')
+}
+
+function sanitizeAttachments(attachments: PlanPromptAttachment[]): PlanPromptAttachment[] {
+  const maxChars = 250_000
+  return attachments.map((file) => ({
+    name: file.name.slice(0, 200),
+    type: file.type.slice(0, 120),
+    size: file.size,
+    content: file.content.length > maxChars ? file.content.slice(0, maxChars) : file.content
+  }))
+}
+
+function attachmentMessageSummary(attachments: PlanPromptAttachment[]): string {
+  if (attachments.length === 0) return ''
+  return `Attached files: ${attachments.map((file) => file.name).join(', ')}`
+}
+
+function renderAttachments(attachments: PlanPromptAttachment[]): string[] {
+  const maxChars = 120_000
+  return attachments.flatMap((file, index) => {
+    const content = file.content.length > maxChars
+      ? `${file.content.slice(0, maxChars)}\n\n[truncated: ${file.content.length - maxChars} chars omitted]`
+      : file.content
+    return [
+      `### Attachment ${index + 1}: ${file.name}`,
+      `- MIME type: ${file.type || 'unknown'}`,
+      `- Size: ${file.size} bytes`,
+      '```text',
+      content,
+      '```',
+      ''
+    ]
+  })
 }
 
 function extractFinalText(engine: Engine, stdout: string, activities: AgentActivity[]): string {

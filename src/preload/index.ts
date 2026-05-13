@@ -17,6 +17,7 @@ import type {
   Plan,
   PlanFeatureResult,
   PlanMessage,
+  PlanPromptAttachment,
   PlanRunEvent,
   PRCreateResult,
   Project,
@@ -177,6 +178,7 @@ const api = {
       prompt: string
       planTitle: string
       planContent: string
+      attachments?: PlanPromptAttachment[]
       model?: string
     }): Promise<{ assistantMessageId: number }> => ipcRenderer.invoke(IPC.plansSendPrompt, args),
     cancelPrompt: (planId: number): Promise<void> =>

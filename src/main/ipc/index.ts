@@ -33,7 +33,7 @@ import {
   getAuthMode,
   setAuthMode
 } from '../services/ghAuth'
-import type { Project, Repo, AppConfig, Engine } from '@shared/types'
+import type { Project, Repo, AppConfig, Engine, PlanPromptAttachment } from '@shared/types'
 
 const TRAILBLAZER_REPO = {
   owner: 'Trailblazer-Labs',
@@ -309,6 +309,7 @@ export function registerIpc(win: BrowserWindow) {
         prompt: string
         planTitle: string
         planContent: string
+        attachments?: PlanPromptAttachment[]
         model?: string
       }
     ) => planningRunner.sendPrompt(args)
