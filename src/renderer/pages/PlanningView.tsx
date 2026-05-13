@@ -36,10 +36,23 @@ const promptChips = [
   'Draft acceptance criteria'
 ]
 
+const CHAT_MIN_WIDTH = 280
+const CHAT_MAX_WIDTH = 720
+const CHAT_DEFAULT_WIDTH = 360
+
 export default function PlanningView({ projectId, repos }: { projectId: number; repos: Repo[] }) {
   const qc = useQueryClient()
   const setView = useApp((s) => s.setView)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const assistantInputRef = useRef<HTMLTextAreaElement>(null)
+  const [chatWidth, setChatWidth] = useState<number>(() => {
+    if (typeof window === 'undefined') return CHAT_DEFAULT_WIDTH
+    const stored = Number(window.localStorage.getItem('planning.chatWidth'))
+    if (Number.isFinite(stored) && stored >= CHAT_MIN_WIDTH && stored <= CHAT_MAX_WIDTH) {
+      return stored
+    }
+    return CHAT_DEFAULT_WIDTH
+  })
   const [activePlanId, setActivePlanId] = useState<number | null>(null)
   const [title, setTitle] = useState('')
   const [content, setContent] = useState('')
@@ -227,6 +240,39 @@ export default function PlanningView({ projectId, repos }: { projectId: number; 
   }
 
   useEffect(() => {
+    if (typeof window === 'undefined') return
+    window.localStorage.setItem('planning.chatWidth', String(chatWidth))
+  }, [chatWidth])
+
+  function startResizingChat(e: React.PointerEvent<HTMLDivElement>) {
+    e.preventDefault()
+    const startX = e.clientX
+    const startWidth = chatWidth
+    const onMove = (ev: PointerEvent) => {
+      const dx = startX - ev.clientX
+      const next = Math.max(CHAT_MIN_WIDTH, Math.min(CHAT_MAX_WIDTH, startWidth + dx))
+      setChatWidth(next)
+    }
+    const onUp = () => {
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+      document.body.style.cursor = ''
+      document.body.style.userSelect = ''
+    }
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+    document.body.style.cursor = 'col-resize'
+    document.body.style.userSelect = 'none'
+  }
+
+  useEffect(() => {
+    const el = assistantInputRef.current
+    if (!el) return
+    el.style.height = 'auto'
+    el.style.height = `${Math.min(el.scrollHeight, 200)}px`
+  }, [assistantInput])
+
+  useEffect(() => {
     if (activePlanId === null) return
     const unsub = window.api.plans.onEvent((evt) => {
       if (evt.planId !== activePlanId) return
@@ -263,7 +309,10 @@ export default function PlanningView({ projectId, repos }: { projectId: number; 
   }, [activePlanId, qc])
 
   return (
-    <div className="h-full min-h-0 grid grid-cols-[260px_minmax(0,1fr)_320px] overflow-hidden bg-bg">
+    <div
+      className="h-full min-h-0 grid overflow-hidden bg-bg"
+      style={{ gridTemplateColumns: `260px minmax(0, 1fr) 6px ${chatWidth}px` }}
+    >
       <aside className="border-r border-border bg-[#101010] flex flex-col min-h-0">
         <header className="h-14 px-4 border-b border-border flex items-center justify-between shrink-0">
           <div>
@@ -328,14 +377,14 @@ export default function PlanningView({ projectId, repos }: { projectId: number; 
       <main className="min-w-0 min-h-0 flex flex-col overflow-hidden">
         {activePlan ? (
           <>
-            <header className="h-14 border-b border-border px-5 flex items-center gap-3 shrink-0">
+            <header className="h-14 border-b border-border px-5 flex items-center gap-3 shrink-0 min-w-0">
               <Input
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
-                className="h-9 max-w-xl bg-transparent border-transparent px-0 text-base font-medium focus:border-transparent"
+                className="h-9 min-w-0 flex-1 max-w-xl bg-transparent border-transparent px-0 text-base font-medium focus:border-transparent"
                 aria-label="Plan title"
               />
-              <div className="ml-auto flex items-center gap-3">
+              <div className="flex items-center gap-2 shrink-0">
                 <div className="inline-flex p-1 rounded-md border border-border bg-bg">
                   <DocumentModeButton
                     active={documentMode === 'edit'}
@@ -350,23 +399,29 @@ export default function PlanningView({ projectId, repos }: { projectId: number; 
                     icon={<Eye size={14} />}
                   />
                 </div>
-                <span className="text-[10px] uppercase tracking-wider text-muted">
+                <span className="hidden lg:inline text-[10px] uppercase tracking-wider text-muted">
                   {saveState === 'saving' ? 'Saving' : saveState === 'saved' ? 'Saved' : 'Local'}
                 </span>
                 <Button
                   variant="primary"
-                  className="h-8"
+                  className="h-8 whitespace-nowrap"
                   onClick={turnIntoFeature}
                   disabled={!activePlan || converting}
+                  title={converting ? 'Creating feature...' : 'Turn plan into feature'}
                 >
                   <GitBranch size={14} />
-                  {converting ? 'Creating...' : 'Turn plan into feature'}
+                  <span className="hidden xl:inline">
+                    {converting ? 'Creating...' : 'Turn plan into feature'}
+                  </span>
+                  <span className="xl:hidden">
+                    {converting ? 'Creating' : 'To feature'}
+                  </span>
                 </Button>
                 <button
                   onClick={() => deletePlan(activePlan)}
                   title="Delete plan"
                   aria-label="Delete plan"
-                  className="no-drag w-8 h-8 rounded-md border border-border bg-panel hover:bg-red-950/40 hover:text-red-300 flex items-center justify-center text-muted transition-colors"
+                  className="no-drag w-8 h-8 rounded-md border border-border bg-panel hover:bg-red-950/40 hover:text-red-300 flex items-center justify-center text-muted transition-colors shrink-0"
                 >
                   <Trash2 size={14} />
                 </button>
@@ -413,7 +468,18 @@ export default function PlanningView({ projectId, repos }: { projectId: number; 
         )}
       </main>
 
-      <aside className="border-l border-border bg-[#111111] flex flex-col min-h-0">
+      <div
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="Resize chat panel"
+        onPointerDown={startResizingChat}
+        onDoubleClick={() => setChatWidth(CHAT_DEFAULT_WIDTH)}
+        className="no-drag relative h-full cursor-col-resize group"
+      >
+        <div className="absolute inset-y-0 left-1/2 -translate-x-1/2 w-px bg-border" />
+        <div className="absolute inset-y-0 left-1/2 -translate-x-1/2 w-1.5 bg-transparent group-hover:bg-accent/30 transition-colors" />
+      </div>
+      <aside className="border-l border-border bg-[#111111] flex flex-col min-h-0 min-w-0">
         <header className="h-14 px-4 border-b border-border flex items-center gap-2 shrink-0">
           <div className="w-8 h-8 rounded-md border border-border bg-[#1f1614] flex items-center justify-center text-accent">
             <Lightbulb size={15} />
@@ -495,7 +561,7 @@ export default function PlanningView({ projectId, repos }: { projectId: number; 
               ))}
             </div>
           )}
-          <div className="flex items-center gap-2">
+          <div className="flex items-end gap-2">
             <input
               ref={fileInputRef}
               type="file"
@@ -512,15 +578,20 @@ export default function PlanningView({ projectId, repos }: { projectId: number; 
             >
               <Paperclip size={14} />
             </button>
-            <Input
+            <textarea
+              ref={assistantInputRef}
               value={assistantInput}
               onChange={(e) => setAssistantInput(e.target.value)}
               onKeyDown={(e) => {
-                if (e.key === 'Enter') sendAssistant()
+                if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
+                  e.preventDefault()
+                  sendAssistant()
+                }
               }}
-              placeholder="Ask about this plan..."
-              className="h-9"
+              placeholder="Ask about this plan... (Shift+Enter for newline)"
+              rows={1}
               disabled={!activePlan || assistantRunning}
+              className="no-drag flex-1 min-w-0 min-h-[36px] max-h-[200px] resize-none rounded-md bg-panel border border-border px-3 py-2 text-sm leading-5 outline-none focus:border-accent placeholder:text-muted disabled:opacity-60"
             />
             <button
               onClick={() => {

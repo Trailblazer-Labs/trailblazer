@@ -134,6 +134,22 @@ export default function ActivityList({
     setExpanded((prev) => ({ ...prev, ...nextOpen }))
   }, [busy, runningCategory, hasErrors])
 
+  const prevBusyRef = useRef(busy)
+  useEffect(() => {
+    if (prevBusyRef.current && !busy) {
+      setExpanded((prev) => {
+        if (hasErrors) {
+          const next: Record<string, boolean> = {}
+          for (const key of Object.keys(prev)) next[key] = key === 'error' ? prev[key] : false
+          next.error = true
+          return next
+        }
+        return {}
+      })
+    }
+    prevBusyRef.current = busy
+  }, [busy, hasErrors])
+
   if (items.length === 0) {
     return (
       <div className="rounded-md border border-border bg-bg/50 p-3">
