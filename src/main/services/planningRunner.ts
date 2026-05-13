@@ -14,6 +14,12 @@ import type {
   PlanRunEvent
 } from '@shared/types'
 
+type PreparedAttachment = PlanPromptAttachment & {
+  relativePath: string
+  inlineContent: string | null
+  truncatedChars: number
+}
+
 export const planBus = new EventEmitter()
 
 const inFlight = new Map<
@@ -111,13 +117,14 @@ export async function sendPrompt(args: {
   const activities: AgentActivity[] = []
   const parser = createParser(engine)
   const cwd = prepareProjectContextWorkspace(plan.projectId)
+  const preparedAttachments = writeAttachments(cwd, attachments)
   const agentPrompt = buildPrompt({
     userPrompt: prompt,
     projectId: plan.projectId,
     planId: args.planId,
     planTitle: args.planTitle,
     planContent: args.planContent,
-    attachments,
+    attachments: preparedAttachments,
     previousMessages
   })
 
@@ -263,7 +270,7 @@ function buildPrompt({
   planId: number
   planTitle: string
   planContent: string
-  attachments: PlanPromptAttachment[]
+  attachments: PreparedAttachment[]
   previousMessages: PlanMessage[]
 }) {
   const repos = getProjectRepos(projectId)
@@ -324,7 +331,7 @@ function buildPrompt({
 }
 
 function sanitizeAttachments(attachments: PlanPromptAttachment[]): PlanPromptAttachment[] {
-  const maxChars = 250_000
+  const maxChars = 10_000_000
   return attachments.map((file) => ({
     name: file.name.slice(0, 200),
     type: file.type.slice(0, 120),
@@ -333,26 +340,61 @@ function sanitizeAttachments(attachments: PlanPromptAttachment[]): PlanPromptAtt
   }))
 }
 
+function writeAttachments(root: string, attachments: PlanPromptAttachment[]): PreparedAttachment[] {
+  if (attachments.length === 0) return []
+  const dir = path.join(root, 'attachments')
+  fs.mkdirSync(dir, { recursive: true })
+  return attachments.map((file, index) => {
+    const safeName = safeFileName(file.name) || `attachment-${index + 1}.txt`
+    const relativePath = path.posix.join('attachments', `${index + 1}-${safeName}`)
+    fs.writeFileSync(path.join(root, relativePath), file.content)
+    const inlineLimit = 120_000
+    const inlineContent =
+      file.content.length <= inlineLimit ? file.content : file.content.slice(0, inlineLimit)
+    return {
+      ...file,
+      relativePath,
+      inlineContent,
+      truncatedChars: Math.max(0, file.content.length - inlineContent.length)
+    }
+  })
+}
+
+function safeFileName(name: string): string {
+  return name
+    .replace(/[/\\?%*:|"<>]/g, '-')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 160)
+}
+
 function attachmentMessageSummary(attachments: PlanPromptAttachment[]): string {
   if (attachments.length === 0) return ''
   return `Attached files: ${attachments.map((file) => file.name).join(', ')}`
 }
 
-function renderAttachments(attachments: PlanPromptAttachment[]): string[] {
-  const maxChars = 120_000
+function renderAttachments(attachments: PreparedAttachment[]): string[] {
   return attachments.flatMap((file, index) => {
-    const content = file.content.length > maxChars
-      ? `${file.content.slice(0, maxChars)}\n\n[truncated: ${file.content.length - maxChars} chars omitted]`
-      : file.content
-    return [
+    const lines = [
       `### Attachment ${index + 1}: ${file.name}`,
+      `- Available at: ${file.relativePath}`,
       `- MIME type: ${file.type || 'unknown'}`,
       `- Size: ${file.size} bytes`,
-      '```text',
-      content,
-      '```',
       ''
     ]
+    if (file.inlineContent !== null) {
+      lines.push(
+        'Inline preview:',
+        '```text',
+        file.inlineContent,
+        file.truncatedChars > 0
+          ? `\n[preview truncated: ${file.truncatedChars} chars omitted; read ${file.relativePath} for the full file]`
+          : '',
+        '```',
+        ''
+      )
+    }
+    return lines
   })
 }
 

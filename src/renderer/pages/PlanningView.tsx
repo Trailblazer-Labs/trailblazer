@@ -152,11 +152,11 @@ export default function PlanningView({ projectId, repos }: { projectId: number; 
 
   async function addAttachments(files: FileList | null) {
     if (!files || files.length === 0) return
-    const maxBytes = 250_000
+    const maxBytes = 10_000_000
     const next: PlanPromptAttachment[] = []
     for (const file of Array.from(files)) {
       if (file.size > maxBytes) {
-        setAssistantError(`${file.name} is too large. Attach files under 250 KB.`)
+        setAssistantError(`${file.name} is too large. Attach files under 10 MB.`)
         continue
       }
       const content = await file.text()
