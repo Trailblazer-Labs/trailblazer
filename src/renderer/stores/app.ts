@@ -7,7 +7,7 @@ type View =
   | { kind: 'onboarding' }
   | { kind: 'projects' }
   | { kind: 'project'; projectId: number }
-  | { kind: 'feature'; projectId: number; featureId: number; sessionId?: number }
+  | { kind: 'feature'; projectId: number; featureId: number; sessionId?: number; initialDraft?: string }
 
 interface RunState {
   runId: string | null

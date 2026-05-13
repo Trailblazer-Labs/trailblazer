@@ -84,6 +84,29 @@ export async function commitAll(worktreePath: string, message: string): Promise<
 
 export async function pushBranch(worktreePath: string, branch: string): Promise<void> {
   const git = simpleGit(worktreePath)
+  let hasRemoteBranch = false
+  try {
+    await git.fetch('origin', branch)
+    await git.raw(['rev-parse', '--verify', `origin/${branch}`])
+    hasRemoteBranch = true
+  } catch {
+    // New branch on this remote — push will create it.
+  }
+  if (hasRemoteBranch) {
+    try {
+      await git.raw(['merge-base', '--is-ancestor', `origin/${branch}`, 'HEAD'])
+    } catch {
+      try {
+        await git.raw(['rebase', `origin/${branch}`])
+      } catch (e) {
+        throw new Error(
+          `Remote branch origin/${branch} has new commits. Rebase failed; resolve conflicts in ${worktreePath}, then retry. ${
+            e instanceof Error ? e.message : String(e)
+          }`
+        )
+      }
+    }
+  }
   await git.push(['-u', 'origin', branch])
 }
 

@@ -78,12 +78,13 @@ function createClaudeParser(): AgentParser {
     }
 
     if (ev.type === 'result') {
+      const failed = ev.is_error || ev.error || ev.api_error_status || ev.subtype !== 'success'
       out.push({
         id: randomUUID(),
-        kind: 'final',
-        label: 'Done',
+        kind: failed ? 'error' : 'final',
+        label: failed && typeof ev.result === 'string' ? truncate(ev.result, 240) : 'Done',
         detail: typeof ev.result === 'string' ? truncate(ev.result, 240) : undefined,
-        status: ev.subtype === 'success' ? 'done' : 'failed',
+        status: failed ? 'failed' : 'done',
         ts: Date.now()
       })
     }

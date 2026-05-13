@@ -13,9 +13,10 @@ import {
   ensureRepoCloned
 } from './git'
 import * as gh from './github'
-import { getEngine, spawnAgent } from './engine'
+import { spawnAgent } from './engine'
 import { createParser } from './agentParser'
-import { getModel } from './modelPrefs'
+import { getProjectIdForRepo, resolveProjectAgent } from './projectPrefs'
+import { extractAgentApiError } from './agentErrors'
 import { AGENT_INSTRUCTIONS_FILE_PROMPT } from './agentInstructions'
 import type { Run, RunEvent, DiffFile } from '@shared/types'
 
@@ -128,9 +129,12 @@ async function execute(runId: string, issueTitle: string, issueBody: string) {
   if (!ctx) return
   setStatus(runId, 'running')
 
-  const engine = getEngine()
-  if (!engine) {
-    emit({ type: 'error', runId, message: 'No engine configured — pick one in Settings' })
+  let engine
+  let model
+  try {
+    ;({ engine, model } = resolveProjectAgent(getProjectIdForRepo(ctx.run.repoId), 'issueResolve'))
+  } catch (e) {
+    emit({ type: 'error', runId, message: e instanceof Error ? e.message : 'No assistant configured' })
     setStatus(runId, 'failed')
     inFlight.delete(runId)
     return
@@ -138,8 +142,7 @@ async function execute(runId: string, issueTitle: string, issueBody: string) {
   const prompt = buildPrompt(issueTitle, issueBody)
   const parser = createParser(engine)
 
-  const model = getModel('issueResolve', engine)
-  const { proc, done } = spawnAgent(
+  const { proc, done, getStdout } = spawnAgent(
     engine,
     prompt,
     'write',
@@ -153,6 +156,7 @@ async function execute(runId: string, issueTitle: string, issueBody: string) {
   ctx.proc = proc
 
   const code = await done
+  const stdout = getStdout()
   if (ctx.cancelled) {
     setStatus(runId, 'cancelled')
     await cleanupWorktree(runId)
@@ -161,6 +165,15 @@ async function execute(runId: string, issueTitle: string, issueBody: string) {
   }
   if (code !== 0) {
     emit({ type: 'error', runId, message: `${engine} exited with code ${code}` })
+    setStatus(runId, 'failed')
+    await cleanupWorktree(runId)
+    inFlight.delete(runId)
+    return
+  }
+
+  const apiError = extractAgentApiError(stdout)
+  if (apiError) {
+    emit({ type: 'error', runId, message: apiError })
     setStatus(runId, 'failed')
     await cleanupWorktree(runId)
     inFlight.delete(runId)

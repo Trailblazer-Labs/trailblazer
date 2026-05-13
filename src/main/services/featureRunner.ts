@@ -3,7 +3,7 @@ import path from 'node:path'
 import fs from 'node:fs'
 import simpleGit from 'simple-git'
 import { getDb } from './db'
-import { getEngine, spawnAgent } from './engine'
+import { spawnAgent } from './engine'
 import { createParser } from './agentParser'
 import {
   getFeature,
@@ -20,13 +20,15 @@ import { pushBranch, refreshRemoteUrl } from './git'
 import * as gh from './github'
 import { getAuthMode, ghGetToken } from './ghAuth'
 import { kvGetSecret } from './db'
-import { getModel, setModel } from './modelPrefs'
+import { resolveProjectAgent, setProjectModel } from './projectPrefs'
+import { extractAgentApiError } from './agentErrors'
 import { AGENT_INSTRUCTIONS_FILE_PROMPT } from './agentInstructions'
 import type {
   AgentActivity,
   Engine,
   FeatureMessage,
-  FeatureRepo
+  FeatureRepo,
+  PlanPromptAttachment
 } from '@shared/types'
 
 export type FeatureRunEvent =
@@ -123,14 +125,18 @@ export async function sendPrompt(args: {
   featureId: number
   sessionId?: number
   prompt: string
+  attachments?: PlanPromptAttachment[]
   model?: string
 }): Promise<{ assistantMessageId: number; sessionId: number }> {
   const feature = getFeature(args.featureId)
   if (!feature) throw new Error('feature not found')
   if (inFlight.has(args.featureId)) throw new Error('a turn is already in flight for this feature')
 
-  const engine = getEngine()
-  if (!engine) throw new Error('no engine configured')
+  const { engine, model: resolvedModel } = resolveProjectAgent(
+    feature.projectId,
+    'feature',
+    args.model
+  )
 
   const repos = listFeatureRepos(args.featureId)
   if (repos.length === 0) throw new Error('feature has no repositories')
@@ -171,9 +177,11 @@ export async function sendPrompt(args: {
       heads.set(r.repoId, '')
     }
   }
+  const attachments = writeFeatureAttachments(feature.workspacePath, args.attachments ?? [])
+  const userPrompt = withAttachmentInstructions(args.prompt, attachments)
   const prompt = isFirstTurn
-    ? buildFirstTurnPrompt(feature.workspacePath, repos, args.prompt)
-    : args.prompt
+    ? buildFirstTurnPrompt(feature.workspacePath, repos, userPrompt)
+    : userPrompt
 
   emit({ type: 'start', featureId: args.featureId, engine, userMessageId })
 
@@ -185,8 +193,8 @@ export async function sendPrompt(args: {
   // Pre-create assistant message row so renderer can attach activities to it.
   const assistantMessageId = insertMessage(args.featureId, session.id, 'assistant', '', [])
 
-  const model = args.model || getModel('feature', engine)
-  if (args.model) setModel('feature', engine, args.model)
+  const model = resolvedModel
+  if (args.model) setProjectModel(feature.projectId, 'feature', args.model)
   const { proc, done, getStdout, getStderr } = spawnAgent(
     engine,
     prompt,
@@ -243,6 +251,12 @@ export async function sendPrompt(args: {
   // Extract the FULL assistant text from raw stdout (the parser truncates the activity
   // detail for display, so we can't rely on collected activities for storage).
   const stdout = getStdout()
+  const apiError = extractAgentApiError(stdout)
+  if (apiError) {
+    updateAssistantMessage(assistantMessageId, apiError, collected)
+    emit({ type: 'error', featureId: args.featureId, message: apiError })
+    return { assistantMessageId, sessionId: session.id }
+  }
   const finalText = extractFinalText(engine, stdout, collected)
   updateAssistantMessage(assistantMessageId, finalText, collected)
 
@@ -379,10 +393,71 @@ function buildFirstTurnPrompt(
   ].join('\n')
 }
 
+type FeatureAttachment = PlanPromptAttachment & {
+  relativePath: string
+  inlineContent: string
+  truncatedChars: number
+}
+
+function writeFeatureAttachments(
+  workspacePath: string,
+  attachments: PlanPromptAttachment[]
+): FeatureAttachment[] {
+  if (attachments.length === 0) return []
+  const dir = path.join(workspacePath, '.trailblazer-attachments')
+  fs.mkdirSync(dir, { recursive: true })
+  return attachments.map((file, index) => {
+    const safeName = safeFileName(file.name) || `attachment-${index + 1}`
+    const relativePath = path.posix.join('.trailblazer-attachments', `${Date.now()}-${index + 1}-${safeName}`)
+    fs.writeFileSync(path.join(workspacePath, relativePath), attachmentBytes(file))
+    const inlineLimit = file.encoding === 'dataUrl' ? 0 : 120_000
+    const inlineContent = inlineLimit > 0 ? file.content.slice(0, inlineLimit) : ''
+    return {
+      ...file,
+      relativePath,
+      inlineContent,
+      truncatedChars: Math.max(0, file.content.length - inlineContent.length)
+    }
+  })
+}
+
+function withAttachmentInstructions(prompt: string, attachments: FeatureAttachment[]): string {
+  if (attachments.length === 0) return prompt
+  return [
+    prompt,
+    '',
+    'Attachments provided by the user:',
+    ...attachments.flatMap((file, index) => [
+      `### Attachment ${index + 1}: ${file.name}`,
+      `- Available at: ${file.relativePath}`,
+      `- MIME type: ${file.type || 'unknown'}`,
+      `- Size: ${file.size} bytes`,
+      file.inlineContent
+        ? `Inline preview:\n\`\`\`text\n${file.inlineContent}${file.truncatedChars > 0 ? `\n[preview truncated: ${file.truncatedChars} chars omitted; read ${file.relativePath} for the full file]` : ''}\n\`\`\``
+        : '- Binary/image attachment: inspect the file path directly if needed.'
+    ])
+  ].join('\n')
+}
+
+function attachmentBytes(file: PlanPromptAttachment): Buffer | string {
+  if (file.encoding !== 'dataUrl') return file.content
+  const match = file.content.match(/^data:[^;]+;base64,(.+)$/)
+  if (!match) return file.content
+  return Buffer.from(match[1], 'base64')
+}
+
+function safeFileName(name: string): string {
+  return name
+    .replace(/[/\\?%*:|"<>]/g, '-')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 160)
+}
+
 export interface FeatureCommitResult {
   repoId: number
   repoName: string
-  status: 'committed' | 'clean' | 'failed'
+  status: 'committed' | 'clean' | 'published' | 'failed'
   sha?: string
   filesCommitted?: number
   error?: string
@@ -419,6 +494,78 @@ export async function commitFeatureChanges(
         sha: commit.commit,
         filesCommitted: fileCount
       })
+    } catch (e) {
+      out.push({
+        repoId: r.repoId,
+        repoName: r.repoName,
+        status: 'failed',
+        error: e instanceof Error ? e.message : String(e)
+      })
+    }
+  }
+  return out
+}
+
+export async function commitAndPublishFeatureChanges(
+  featureId: number,
+  message: string
+): Promise<FeatureCommitResult[]> {
+  const feature = getFeature(featureId)
+  if (!feature) throw new Error('feature not found')
+  const msg = message.trim() || `chore: ${feature.name} WIP`
+  const repos = listFeatureRepos(featureId)
+  const out: FeatureCommitResult[] = []
+  for (const r of repos) {
+    try {
+      const git = simpleGit(r.worktreePath)
+      await refreshRemoteUrl(r.worktreePath, r.repoOwner, r.repoName)
+      const status = await git.status()
+      let filesCommitted: number | undefined
+      let sha: string | undefined
+      if (!status.isClean()) {
+        filesCommitted = status.files.length
+        await git.add(['-A'])
+        const commit = await git.commit(msg)
+        sha = commit.commit
+      }
+      await pushBranch(r.worktreePath, r.branch)
+      out.push({
+        repoId: r.repoId,
+        repoName: r.repoName,
+        status: 'published',
+        sha,
+        filesCommitted
+      })
+    } catch (e) {
+      out.push({
+        repoId: r.repoId,
+        repoName: r.repoName,
+        status: 'failed',
+        error: e instanceof Error ? e.message : String(e)
+      })
+    }
+  }
+  return out
+}
+
+export async function publishFeatureBranches(featureId: number): Promise<FeatureCommitResult[]> {
+  const feature = getFeature(featureId)
+  if (!feature) throw new Error('feature not found')
+  const repos = listFeatureRepos(featureId)
+  const out: FeatureCommitResult[] = []
+  for (const r of repos) {
+    try {
+      const git = simpleGit(r.worktreePath)
+      await refreshRemoteUrl(r.worktreePath, r.repoOwner, r.repoName)
+      await git.fetch('origin', r.baseBranch).catch(() => {})
+      const rev = await git.raw(['rev-list', '--count', `origin/${r.baseBranch}..HEAD`])
+      const aheadCount = parseInt(rev.trim(), 10) || 0
+      if (aheadCount === 0) {
+        out.push({ repoId: r.repoId, repoName: r.repoName, status: 'clean' })
+        continue
+      }
+      await pushBranch(r.worktreePath, r.branch)
+      out.push({ repoId: r.repoId, repoName: r.repoName, status: 'published' })
     } catch (e) {
       out.push({
         repoId: r.repoId,
@@ -561,6 +708,7 @@ export async function createPRs(featureId: number): Promise<
       // Ask the configured engine to write a real title + description for the changes
       // on this branch. Falls back to a generic message if generation fails.
       const generated = await generatePRMessage({
+        projectId: feature.projectId,
         worktreePath: r.worktreePath,
         baseBranch: r.baseBranch,
         featureName: feature.name,
@@ -844,17 +992,13 @@ function humanizeFeatureName(s: string): string {
  * caller can fall back to a generic message.
  */
 async function generatePRMessage(args: {
+  projectId: number
   worktreePath: string
   baseBranch: string
   featureName: string
   repoName: string
 }): Promise<{ title: string; body: string } | null> {
-  const engine = getEngine()
-  if (!engine) {
-    // eslint-disable-next-line no-console
-    console.warn('[pr-message] skipped: no engine configured')
-    return null
-  }
+  const { engine, model } = resolveProjectAgent(args.projectId, 'issueResolve')
 
   const git = simpleGit(args.worktreePath)
   // Gather commit subjects ahead of base.
@@ -924,7 +1068,6 @@ async function generatePRMessage(args: {
     `- Do not include the engine name or "Generated by …" footers.`
   ].join('\n')
 
-  const model = getModel('issueResolve', engine)
   const { done, getStdout, getStderr } = spawnAgent(
     engine,
     prompt,

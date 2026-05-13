@@ -81,12 +81,44 @@ function migrate(d: Database.Database) {
       activities TEXT,
       ts TEXT NOT NULL DEFAULT (datetime('now'))
     );
+    CREATE TABLE IF NOT EXISTS plans (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      title TEXT NOT NULL,
+      content TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS plans_project_updated_idx ON plans(project_id, updated_at DESC);
+    CREATE TABLE IF NOT EXISTS plan_messages (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      plan_id INTEGER NOT NULL REFERENCES plans(id) ON DELETE CASCADE,
+      role TEXT NOT NULL,
+      content TEXT NOT NULL,
+      activities TEXT,
+      ts TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS plan_messages_plan_idx ON plan_messages(plan_id, id ASC);
   `)
 
   // Add per-repo working_branch column for the "issues working branch" setting.
   const repoCols = d.prepare('PRAGMA table_info(repos)').all() as { name: string }[]
   if (!repoCols.some((c) => c.name === 'working_branch')) {
     d.exec('ALTER TABLE repos ADD COLUMN working_branch TEXT')
+  }
+
+  const projectCols = d.prepare('PRAGMA table_info(projects)').all() as { name: string }[]
+  if (!projectCols.some((c) => c.name === 'assistant_engine')) {
+    d.exec('ALTER TABLE projects ADD COLUMN assistant_engine TEXT')
+  }
+  if (!projectCols.some((c) => c.name === 'feature_model')) {
+    d.exec('ALTER TABLE projects ADD COLUMN feature_model TEXT')
+  }
+  if (!projectCols.some((c) => c.name === 'issue_expand_model')) {
+    d.exec('ALTER TABLE projects ADD COLUMN issue_expand_model TEXT')
+  }
+  if (!projectCols.some((c) => c.name === 'issue_resolve_model')) {
+    d.exec('ALTER TABLE projects ADD COLUMN issue_resolve_model TEXT')
   }
 
   // ─── feature_sessions: multiple sessions per feature ───────────────────────

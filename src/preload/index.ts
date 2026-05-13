@@ -14,6 +14,11 @@ import type {
   FeatureRunEvent,
   FeatureSession,
   GhAuthEvent,
+  Plan,
+  PlanFeatureResult,
+  PlanMessage,
+  PlanPromptAttachment,
+  PlanRunEvent,
   PRCreateResult,
   Project,
   Repo,
@@ -23,6 +28,7 @@ import type {
   Run,
   RunEvent,
   DiffFile,
+  ReleaseGateStatus,
   UpdateStatus
 } from '../shared/types'
 
@@ -59,6 +65,10 @@ const api = {
       ipcRenderer.on(IPC.updaterEvent, listener)
       return () => { ipcRenderer.off(IPC.updaterEvent, listener) }
     }
+  },
+  releaseGate: {
+    get: (): Promise<ReleaseGateStatus> => ipcRenderer.invoke(IPC.releaseGateGet),
+    refresh: (): Promise<ReleaseGateStatus> => ipcRenderer.invoke(IPC.releaseGateRefresh)
   },
   gh: {
     detect: (): Promise<{ found: boolean; path?: string; version?: string }> =>
@@ -139,7 +149,17 @@ const api = {
   },
   projects: {
     list: (): Promise<Project[]> => ipcRenderer.invoke(IPC.projectsList),
+    get: (id: number): Promise<Project | null> => ipcRenderer.invoke(IPC.projectsGet, id),
     create: (name: string): Promise<Project> => ipcRenderer.invoke(IPC.projectsCreate, name),
+    updateSettings: (
+      id: number,
+      patch: {
+        assistantEngine?: Engine | null
+        featureModel?: string | null
+        issueExpandModel?: string | null
+        issueResolveModel?: string | null
+      }
+    ): Promise<Project> => ipcRenderer.invoke(IPC.projectsUpdateSettings, id, patch),
     delete: (id: number) => ipcRenderer.invoke(IPC.projectsDelete, id),
     addRepo: (
       projectId: number,
@@ -151,6 +171,38 @@ const api = {
     removeRepo: (repoId: number) => ipcRenderer.invoke(IPC.projectsRemoveRepo, repoId),
     listRepos: (projectId: number): Promise<Repo[]> =>
       ipcRenderer.invoke(IPC.projectsListRepos, projectId)
+  },
+  plans: {
+    list: (projectId: number): Promise<Plan[]> => ipcRenderer.invoke(IPC.plansList, projectId),
+    get: (planId: number): Promise<Plan | null> => ipcRenderer.invoke(IPC.plansGet, planId),
+    create: (projectId: number, title?: string): Promise<Plan> =>
+      ipcRenderer.invoke(IPC.plansCreate, projectId, title),
+    update: (planId: number, patch: { title?: string; content?: string }): Promise<Plan> =>
+      ipcRenderer.invoke(IPC.plansUpdate, planId, patch),
+    delete: (planId: number): Promise<{ ok: true }> => ipcRenderer.invoke(IPC.plansDelete, planId),
+    createFeature: (args: {
+      planId: number
+      name: string
+      content: string
+      repoIds: number[]
+    }): Promise<PlanFeatureResult> => ipcRenderer.invoke(IPC.plansCreateFeature, args),
+    listMessages: (planId: number): Promise<PlanMessage[]> =>
+      ipcRenderer.invoke(IPC.plansListMessages, planId),
+    sendPrompt: (args: {
+      planId: number
+      prompt: string
+      planTitle: string
+      planContent: string
+      attachments?: PlanPromptAttachment[]
+      model?: string
+    }): Promise<{ assistantMessageId: number }> => ipcRenderer.invoke(IPC.plansSendPrompt, args),
+    cancelPrompt: (planId: number): Promise<void> =>
+      ipcRenderer.invoke(IPC.plansCancelPrompt, planId),
+    onEvent: (cb: (evt: PlanRunEvent) => void) => {
+      const listener = (_e: IpcRendererEvent, evt: PlanRunEvent) => cb(evt)
+      ipcRenderer.on(IPC.plansEvent, listener)
+      return () => { ipcRenderer.off(IPC.plansEvent, listener) }
+    }
   },
   features: {
     list: (projectId: number): Promise<Feature[]> => ipcRenderer.invoke(IPC.featuresList, projectId),
@@ -184,6 +236,7 @@ const api = {
       featureId: number
       sessionId?: number
       prompt: string
+      attachments?: PlanPromptAttachment[]
       model?: string
     }): Promise<{ assistantMessageId: number; sessionId: number }> =>
       ipcRenderer.invoke(IPC.featuresSendPrompt, args),
@@ -208,6 +261,13 @@ const api = {
     ): Promise<FeatureRepoChanges[]> => ipcRenderer.invoke(IPC.featuresGetChanges, args),
     commit: (args: { featureId: number; message: string }): Promise<FeatureCommitResult[]> =>
       ipcRenderer.invoke(IPC.featuresCommit, args),
+    commitAndPublish: (args: {
+      featureId: number
+      message: string
+    }): Promise<FeatureCommitResult[]> =>
+      ipcRenderer.invoke(IPC.featuresCommitPublish, args),
+    publish: (featureId: number): Promise<FeatureCommitResult[]> =>
+      ipcRenderer.invoke(IPC.featuresPublish, featureId),
     onEvent: (cb: (evt: FeatureRunEvent) => void) => {
       const listener = (_e: IpcRendererEvent, evt: FeatureRunEvent) => cb(evt)
       ipcRenderer.on(IPC.featuresEvent, listener)

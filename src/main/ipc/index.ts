@@ -13,6 +13,7 @@ import {
   getUpdateStatus,
   quitAndInstall
 } from '../services/updater'
+import { checkReleaseGate, getReleaseGateStatus } from '../services/releaseGate'
 import {
   getCachedDiscoveredModels,
   refreshDiscoveredModels
@@ -20,6 +21,16 @@ import {
 import type { ModelUseCase } from '@shared/models'
 import * as features from '../services/features'
 import * as featureRunner from '../services/featureRunner'
+import * as plans from '../services/plans'
+import * as planningRunner from '../services/planningRunner'
+import {
+  getProject,
+  listProjects,
+  projectFromRow,
+  updateProjectSettings,
+  type ProjectRow,
+  type ProjectSettingsPatch
+} from '../services/projectPrefs'
 import {
   detectGh,
   ghAuthStatus,
@@ -31,7 +42,7 @@ import {
   getAuthMode,
   setAuthMode
 } from '../services/ghAuth'
-import type { Project, Repo, AppConfig, Engine } from '@shared/types'
+import type { Project, Repo, AppConfig, Engine, PlanPromptAttachment } from '@shared/types'
 
 const TRAILBLAZER_REPO = {
   owner: 'Trailblazer-Labs',
@@ -52,6 +63,9 @@ export function registerIpc(win: BrowserWindow) {
   })
   featureRunner.featureBus.on('event', (evt) => {
     if (!win.isDestroyed()) win.webContents.send(IPC.featuresEvent, evt)
+  })
+  planningRunner.planBus.on('event', (evt) => {
+    if (!win.isDestroyed()) win.webContents.send(IPC.plansEvent, evt)
   })
 
   // ── config ───────────────────────────────────────────
@@ -126,6 +140,8 @@ export function registerIpc(win: BrowserWindow) {
   ipcMain.handle(IPC.updaterCheck, () => checkForUpdates())
   ipcMain.handle(IPC.updaterDownload, () => downloadUpdate())
   ipcMain.handle(IPC.updaterQuitAndInstall, () => quitAndInstall())
+  ipcMain.handle(IPC.releaseGateGet, () => getReleaseGateStatus())
+  ipcMain.handle(IPC.releaseGateRefresh, () => checkReleaseGate())
 
   // ── github ───────────────────────────────────────────
   ipcMain.handle(IPC.githubValidatePat, (_e, token: string) => gh.validatePat(token))
@@ -161,20 +177,34 @@ export function registerIpc(win: BrowserWindow) {
 
   // ── projects ─────────────────────────────────────────
   ipcMain.handle(IPC.projectsList, (): Project[] => {
-    const rows = getDb()
-      .prepare('SELECT id, name, created_at FROM projects ORDER BY id DESC')
-      .all() as { id: number; name: string; created_at: string }[]
-    return rows.map((r) => ({ id: r.id, name: r.name, createdAt: r.created_at }))
+    return listProjects()
   })
 
+  ipcMain.handle(IPC.projectsGet, (_e, projectId: number): Project | null =>
+    getProject(projectId)
+  )
+
   ipcMain.handle(IPC.projectsCreate, (_e, name: string): Project => {
-    const r = getDb().prepare('INSERT INTO projects(name) VALUES(?)').run(name)
+    const engine = getEngine()
+    const r = getDb()
+      .prepare('INSERT INTO projects(name, assistant_engine) VALUES(?,?)')
+      .run(name, engine)
     return {
       id: Number(r.lastInsertRowid),
       name,
-      createdAt: new Date().toISOString()
+      createdAt: new Date().toISOString(),
+      assistantEngine: engine,
+      featureModel: null,
+      issueExpandModel: null,
+      issueResolveModel: null
     }
   })
+
+  ipcMain.handle(
+    IPC.projectsUpdateSettings,
+    (_e, projectId: number, patch: ProjectSettingsPatch): Project =>
+      updateProjectSettings(projectId, patch)
+  )
 
   ipcMain.handle(IPC.projectsDelete, (_e, projectId: number) => {
     getDb().prepare('DELETE FROM projects WHERE id = ?').run(projectId)
@@ -210,19 +240,39 @@ export function registerIpc(win: BrowserWindow) {
       | undefined
 
     if (existing) {
-      return { id: existing.id, name: existing.name, createdAt: existing.created_at }
+      return getProject(existing.id) ?? {
+        id: existing.id,
+        name: existing.name,
+        createdAt: existing.created_at,
+        assistantEngine: null,
+        featureModel: null,
+        issueExpandModel: null,
+        issueResolveModel: null
+      }
     }
 
     const project =
       (db
-        .prepare(`SELECT id, name, created_at FROM projects WHERE name = ? ORDER BY id ASC LIMIT 1`)
-        .get('Trailblazer') as { id: number; name: string; created_at: string } | undefined) ??
+        .prepare(
+          `SELECT id, name, created_at, assistant_engine, feature_model, issue_expand_model, issue_resolve_model
+             FROM projects
+            WHERE name = ?
+            ORDER BY id ASC
+            LIMIT 1`
+        )
+        .get('Trailblazer') as ProjectRow | undefined) ??
       (() => {
-        const created = db.prepare('INSERT INTO projects(name) VALUES(?)').run('Trailblazer')
+        const created = db
+          .prepare('INSERT INTO projects(name, assistant_engine) VALUES(?,?)')
+          .run('Trailblazer', getEngine())
         return {
           id: Number(created.lastInsertRowid),
           name: 'Trailblazer',
-          created_at: new Date().toISOString()
+          created_at: new Date().toISOString(),
+          assistant_engine: getEngine(),
+          feature_model: null,
+          issue_expand_model: null,
+          issue_resolve_model: null
         }
       })()
 
@@ -237,7 +287,7 @@ export function registerIpc(win: BrowserWindow) {
       localPath
     )
 
-    return { id: project.id, name: project.name, createdAt: project.created_at }
+    return projectFromRow(project)
   })
 
   ipcMain.handle(IPC.projectsRemoveRepo, (_e, repoId: number) => {
@@ -269,6 +319,49 @@ export function registerIpc(win: BrowserWindow) {
       workingBranch: r.working_branch
     }))
   })
+
+  // ── planning ────────────────────────────────────────
+  ipcMain.handle(IPC.plansList, (_e, projectId: number) => plans.listPlans(projectId))
+  ipcMain.handle(IPC.plansGet, (_e, planId: number) => plans.getPlan(planId))
+  ipcMain.handle(IPC.plansCreate, (_e, projectId: number, title?: string) =>
+    plans.createPlan(projectId, title)
+  )
+  ipcMain.handle(
+    IPC.plansUpdate,
+    (_e, planId: number, patch: { title?: string; content?: string }) =>
+      plans.updatePlan(planId, patch)
+  )
+  ipcMain.handle(IPC.plansDelete, (_e, planId: number) => {
+    plans.deletePlan(planId)
+    return { ok: true }
+  })
+  ipcMain.handle(
+    IPC.plansCreateFeature,
+    (
+      _e,
+      args: { planId: number; name: string; content: string; repoIds: number[] }
+    ) => plans.createFeatureFromPlan(args)
+  )
+  ipcMain.handle(IPC.plansListMessages, (_e, planId: number) =>
+    planningRunner.listMessages(planId)
+  )
+  ipcMain.handle(
+    IPC.plansSendPrompt,
+    (
+      _e,
+      args: {
+        planId: number
+        prompt: string
+        planTitle: string
+        planContent: string
+        attachments?: PlanPromptAttachment[]
+        model?: string
+      }
+    ) => planningRunner.sendPrompt(args)
+  )
+  ipcMain.handle(IPC.plansCancelPrompt, (_e, planId: number) =>
+    planningRunner.cancelRun(planId)
+  )
 
   // ── features ─────────────────────────────────────────
   ipcMain.handle(IPC.featuresList, (_e, projectId: number) => features.listFeatures(projectId))
@@ -308,7 +401,13 @@ export function registerIpc(win: BrowserWindow) {
     IPC.featuresSendPrompt,
     (
       _e,
-      args: { featureId: number; sessionId?: number; prompt: string; model?: string }
+      args: {
+        featureId: number
+        sessionId?: number
+        prompt: string
+        attachments?: PlanPromptAttachment[]
+        model?: string
+      }
     ) => featureRunner.sendPrompt(args)
   )
   ipcMain.handle(IPC.featuresListSessions, (_e, featureId: number) =>
@@ -352,6 +451,14 @@ export function registerIpc(win: BrowserWindow) {
     IPC.featuresCommit,
     (_e, args: { featureId: number; message: string }) =>
       featureRunner.commitFeatureChanges(args.featureId, args.message)
+  )
+  ipcMain.handle(
+    IPC.featuresCommitPublish,
+    (_e, args: { featureId: number; message: string }) =>
+      featureRunner.commitAndPublishFeatureChanges(args.featureId, args.message)
+  )
+  ipcMain.handle(IPC.featuresPublish, (_e, featureId: number) =>
+    featureRunner.publishFeatureBranches(featureId)
   )
   ipcMain.handle(IPC.reposSetWorkingBranch, (_e, repoId: number, branch: string | null) => {
     getDb().prepare('UPDATE repos SET working_branch = ? WHERE id = ?').run(branch, repoId)

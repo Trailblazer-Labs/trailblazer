@@ -41,6 +41,8 @@ export default function FeatureChangesPanel({
   } | null>(null)
   const [collapsed, setCollapsed] = useState<Record<number, boolean>>({})
   const [committing, setCommitting] = useState(false)
+  const [publishing, setPublishing] = useState(false)
+  const [pushing, setPushing] = useState(false)
   const [showCommit, setShowCommit] = useState(false)
   const [commitMsg, setCommitMsg] = useState('')
   const [commitError, setCommitError] = useState<string | null>(null)
@@ -61,6 +63,7 @@ export default function FeatureChangesPanel({
   }
 
   const hasUncommitted = changes.some((r) => r.hasUncommitted)
+  const hasPendingCommits = changes.some((r) => r.commitsAhead > 0)
 
   async function commit() {
     setCommitting(true)
@@ -78,6 +81,41 @@ export default function FeatureChangesPanel({
       setCommitError(e instanceof Error ? e.message : 'commit failed')
     } finally {
       setCommitting(false)
+    }
+  }
+
+  async function commitAndPublish() {
+    setPublishing(true)
+    setCommitError(null)
+    try {
+      const result = await window.api.features.commitAndPublish({
+        featureId,
+        message: commitMsg.trim()
+      })
+      setCommitResult(result)
+      setShowCommit(false)
+      setCommitMsg('')
+      void qc.invalidateQueries({ queryKey: ['feature-changes', featureId] })
+      void qc.invalidateQueries({ queryKey: ['feature-repos', featureId] })
+    } catch (e) {
+      setCommitError(e instanceof Error ? e.message : 'publish failed')
+    } finally {
+      setPublishing(false)
+    }
+  }
+
+  async function publish() {
+    setPushing(true)
+    setCommitError(null)
+    try {
+      const result = await window.api.features.publish(featureId)
+      setCommitResult(result)
+      void qc.invalidateQueries({ queryKey: ['feature-changes', featureId] })
+      void qc.invalidateQueries({ queryKey: ['feature-repos', featureId] })
+    } catch (e) {
+      setCommitError(e instanceof Error ? e.message : 'push failed')
+    } finally {
+      setPushing(false)
     }
   }
 
@@ -137,10 +175,19 @@ export default function FeatureChangesPanel({
           {hasUncommitted && (
             <button
               onClick={() => setShowCommit((v) => !v)}
-              disabled={committing}
+              disabled={committing || publishing || pushing}
               className="no-drag h-7 px-2.5 rounded-md border border-accent/40 bg-[#1a1414] text-[11px] text-accent hover:bg-[#221212] disabled:opacity-50"
             >
-              {committing ? 'Committing…' : 'Commit'}
+              {publishing ? 'Publishing…' : committing ? 'Committing…' : 'Commit'}
+            </button>
+          )}
+          {!hasUncommitted && hasPendingCommits && (
+            <button
+              onClick={publish}
+              disabled={pushing}
+              className="no-drag h-7 px-2.5 rounded-md border border-accent/40 bg-[#1a1414] text-[11px] text-accent hover:bg-[#221212] disabled:opacity-50"
+            >
+              {pushing ? 'Pushing…' : 'Push'}
             </button>
           )}
         </div>
@@ -173,10 +220,17 @@ export default function FeatureChangesPanel({
               </button>
               <button
                 onClick={commit}
-                disabled={committing}
+                disabled={committing || publishing}
                 className="text-[11px] text-accent hover:text-text disabled:opacity-50"
               >
                 Commit all
+              </button>
+              <button
+                onClick={commitAndPublish}
+                disabled={committing || publishing}
+                className="text-[11px] text-accent hover:text-text disabled:opacity-50"
+              >
+                Commit & publish
               </button>
             </div>
           </div>
@@ -190,13 +244,15 @@ export default function FeatureChangesPanel({
                     'w-1.5 h-1.5 rounded-full',
                     r.status === 'committed'
                       ? 'bg-green-400'
+                      : r.status === 'published'
+                        ? 'bg-accent'
                       : r.status === 'failed'
                         ? 'bg-red-400'
                         : 'bg-muted/40'
                   )}
                 />
                 <span className="truncate">
-                  {r.repoName}: {r.status === 'committed' ? `${r.filesCommitted} file${r.filesCommitted === 1 ? '' : 's'} committed` : r.status === 'clean' ? 'nothing to commit' : `failed — ${r.error}`}
+                  {r.repoName}: {resultLabel(r)}
                 </span>
               </div>
             ))}
@@ -243,6 +299,11 @@ export default function FeatureChangesPanel({
                     ▶
                   </span>
                   <span className="text-xs flex-1 truncate">{repo.repoName}</span>
+                  {repo.commitsAhead > 0 && (
+                    <span className="text-[10px] text-accent tabular-nums">
+                      {repo.commitsAhead} ahead
+                    </span>
+                  )}
                   <span className="text-[10px] text-muted tabular-nums">{visible.length}</span>
                   {repo.prNumber && (
                     <Pill tone="open">PR #{repo.prNumber}</Pill>
@@ -291,6 +352,21 @@ export default function FeatureChangesPanel({
       )}
     </div>
   )
+}
+
+function resultLabel(r: FeatureCommitResult): string {
+  if (r.status === 'committed') {
+    return `${r.filesCommitted} file${r.filesCommitted === 1 ? '' : 's'} committed`
+  }
+  if (r.status === 'published') {
+    const committed =
+      typeof r.filesCommitted === 'number'
+        ? `${r.filesCommitted} file${r.filesCommitted === 1 ? '' : 's'} committed and `
+        : ''
+    return `${committed}published`
+  }
+  if (r.status === 'clean') return 'nothing to commit'
+  return `failed - ${r.error}`
 }
 
 function FileStatusGlyph({

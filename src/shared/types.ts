@@ -2,6 +2,10 @@ export interface Project {
   id: number
   name: string
   createdAt: string
+  assistantEngine: Engine | null
+  featureModel: string | null
+  issueExpandModel: string | null
+  issueResolveModel: string | null
 }
 
 export interface Repo {
@@ -24,6 +28,39 @@ export interface Feature {
   createdAt: string
 }
 
+export interface Plan {
+  id: number
+  projectId: number
+  title: string
+  content: string
+  createdAt: string
+  updatedAt: string
+}
+
+export interface PlanMessage {
+  id: number
+  planId: number
+  role: 'user' | 'assistant' | 'system'
+  content: string
+  activities: AgentActivity[] | null
+  ts: string
+}
+
+export interface PlanPromptAttachment {
+  name: string
+  type: string
+  size: number
+  content: string
+  encoding?: 'text' | 'dataUrl'
+}
+
+export type PlanRunEvent =
+  | { type: 'start'; planId: number; engine: Engine; userMessageId: number }
+  | { type: 'activity'; planId: number; activity: AgentActivity }
+  | { type: 'plan-updated'; planId: number; content: string }
+  | { type: 'done'; planId: number; assistantMessageId: number }
+  | { type: 'error'; planId: number; message: string }
+
 export interface FeatureRepo {
   featureId: number
   repoId: number
@@ -44,6 +81,13 @@ export interface FeatureSession {
   cliSessionId: string | null
   createdAt: string
   lastUsedAt: string | null
+}
+
+export interface PlanFeatureResult {
+  feature: Feature
+  featureRepos: FeatureRepo[]
+  session: FeatureSession
+  planFile: string
 }
 
 export interface FeatureMessage {
@@ -98,7 +142,7 @@ export interface FeatureRepoChanges {
 export interface FeatureCommitResult {
   repoId: number
   repoName: string
-  status: 'committed' | 'clean' | 'failed'
+  status: 'committed' | 'clean' | 'published' | 'failed'
   sha?: string
   filesCommitted?: number
   error?: string
@@ -181,6 +225,17 @@ export interface UpdateStatus {
   percent: number | null
   message: string | null
   checkedAt: string | null
+}
+
+export interface ReleaseGateStatus {
+  currentVersion: string
+  checkedAt: string | null
+  blocked: boolean
+  reason: string | null
+  message: string | null
+  updateUrl: string | null
+  manifestUrl: string | null
+  error: string | null
 }
 
 export type ExpandEvent =

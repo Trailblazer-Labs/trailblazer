@@ -4,14 +4,17 @@ import type { RepoSearchResult } from '@shared/types'
 
 export default function RepoPicker({
   selected,
-  onChange
+  onChange,
+  disabledFullNames = []
 }: {
   selected: RepoSearchResult[]
   onChange: (next: RepoSearchResult[]) => void
+  disabledFullNames?: string[]
 }) {
   const [q, setQ] = useState('')
   const [results, setResults] = useState<RepoSearchResult[]>([])
   const [loading, setLoading] = useState(false)
+  const disabled = new Set(disabledFullNames)
 
   useEffect(() => {
     let cancelled = false
@@ -31,6 +34,7 @@ export default function RepoPicker({
   }, [q])
 
   function toggle(r: RepoSearchResult) {
+    if (disabled.has(r.fullName)) return
     const exists = selected.find((s) => s.fullName === r.fullName)
     if (exists) onChange(selected.filter((s) => s.fullName !== r.fullName))
     else onChange([...selected, r])
@@ -50,13 +54,16 @@ export default function RepoPicker({
         )}
         {results.map((r) => {
           const active = !!selected.find((s) => s.fullName === r.fullName)
+          const isDisabled = disabled.has(r.fullName)
           return (
             <button
               key={r.fullName}
+              disabled={isDisabled}
               onClick={() => toggle(r)}
               className={
-                'w-full text-left px-3 py-2 flex items-center justify-between text-sm hover:bg-panel ' +
-                (active ? 'bg-[#1a1414]' : '')
+                'w-full text-left px-3 py-2 flex items-center justify-between text-sm hover:bg-panel disabled:cursor-default disabled:hover:bg-transparent ' +
+                (active ? 'bg-[#1a1414]' : '') +
+                (isDisabled ? ' opacity-55' : '')
               }
             >
               <span>
@@ -66,7 +73,9 @@ export default function RepoPicker({
                   <span className="ml-2 text-[10px] uppercase tracking-wider text-muted">private</span>
                 )}
               </span>
-              <span className={active ? 'text-accent' : 'text-muted'}>{active ? '✓' : '+'}</span>
+              <span className={active ? 'text-accent' : 'text-muted'}>
+                {isDisabled ? 'Added' : active ? '✓' : '+'}
+              </span>
             </button>
           )
         })}

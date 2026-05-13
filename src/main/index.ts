@@ -4,6 +4,7 @@ import fs from 'node:fs'
 import { registerIpc } from './ipc'
 import { getDb } from './services/db'
 import { initUpdater } from './services/updater'
+import { checkReleaseGate } from './services/releaseGate'
 
 // Override the default "Electron" app name shown in the macOS menu bar and Dock during dev.
 // In packaged builds this comes from CFBundleName in Info.plist (set via productName).
@@ -88,6 +89,7 @@ function createWindow() {
 
 app.whenReady().then(() => {
   getDb() // init/migrate db
+  void checkReleaseGate()
   if (process.platform === 'darwin') {
     const iconPath = resolveIconPath()
     if (iconPath) app.dock?.setIcon(nativeImage.createFromPath(iconPath))
