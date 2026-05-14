@@ -1,5 +1,5 @@
 import Database from 'better-sqlite3'
-import { app, safeStorage } from 'electron'
+import { app } from 'electron'
 import path from 'node:path'
 import fs from 'node:fs'
 
@@ -211,12 +211,11 @@ function migrate(d: Database.Database) {
   }
 }
 
-// Encrypted KV helpers (Electron safeStorage). Falls back to plaintext on unsupported platforms.
+// App-local KV helpers. Avoid Electron safeStorage here because macOS Keychain prompts
+// are disruptive in a desktop app that reads config on startup.
 export function kvSetSecret(key: string, value: string) {
   const d = getDb()
-  const buf = safeStorage.isEncryptionAvailable()
-    ? safeStorage.encryptString(value)
-    : Buffer.from(value, 'utf8')
+  const buf = Buffer.from(value, 'utf8')
   d.prepare('INSERT INTO kv(k,v) VALUES(?,?) ON CONFLICT(k) DO UPDATE SET v=excluded.v').run(
     key,
     buf
@@ -227,13 +226,6 @@ export function kvGetSecret(key: string): string | null {
   const d = getDb()
   const row = d.prepare('SELECT v FROM kv WHERE k = ?').get(key) as { v: Buffer } | undefined
   if (!row) return null
-  if (safeStorage.isEncryptionAvailable()) {
-    try {
-      return safeStorage.decryptString(row.v)
-    } catch {
-      return null
-    }
-  }
   return row.v.toString('utf8')
 }
 
