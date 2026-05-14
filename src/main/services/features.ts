@@ -309,6 +309,60 @@ export async function importFeature(opts: {
   return { feature, featureRepos }
 }
 
+export async function rebranchFeatureRepo(args: {
+  featureId: number
+  repoId: number
+  baseBranch: string
+  force?: boolean
+}): Promise<FeatureRepo> {
+  const feature = getFeature(args.featureId)
+  if (!feature) throw new Error('Feature not found')
+  const baseBranch = args.baseBranch.trim()
+  if (!baseBranch) throw new Error('Base branch is required')
+
+  const current = listFeatureRepos(args.featureId).find((repo) => repo.repoId === args.repoId)
+  if (!current) throw new Error('Feature repo not found')
+
+  const row = getDb()
+    .prepare('SELECT id, owner, name FROM repos WHERE id = ?')
+    .get(args.repoId) as { id: number; owner: string; name: string } | undefined
+  if (!row) throw new Error('Repo not found')
+
+  const status = await simpleGit(current.worktreePath).status().catch(() => null)
+  if (status && !status.isClean() && !args.force) {
+    throw new Error('Repo has uncommitted changes. Commit them or confirm rebranch anyway.')
+  }
+
+  const repoPath = await ensureRepoCloned(row.owner, row.name)
+  const repoGit = simpleGit(repoPath)
+  await repoGit.fetch('origin', baseBranch).catch(() => {})
+  await repoGit.raw(['rev-parse', '--verify', `origin/${baseBranch}`]).catch(() => {
+    throw new Error(`Base branch origin/${baseBranch} was not found.`)
+  })
+
+  await removeFeatureWorktree(repoPath, current.worktreePath)
+  fs.mkdirSync(path.dirname(current.worktreePath), { recursive: true })
+
+  const branch = await nextAvailableFeatureBranch(repoPath, `feature/${feature.slug}`)
+  await repoGit.raw(['worktree', 'add', '-b', branch, current.worktreePath, `origin/${baseBranch}`])
+
+  getDb()
+    .prepare(
+      `UPDATE feature_repos
+          SET branch = ?,
+              base_branch = ?,
+              pr_number = NULL,
+              pr_url = NULL
+        WHERE feature_id = ? AND repo_id = ?`
+    )
+    .run(branch, baseBranch, args.featureId, args.repoId)
+
+  const head = (await simpleGit(current.worktreePath).revparse(['HEAD'])).trim()
+  resetSessionBaselinesForRepo(args.featureId, args.repoId, head)
+
+  return listFeatureRepos(args.featureId).find((repo) => repo.repoId === args.repoId)!
+}
+
 export function deleteFeature(featureId: number) {
   const feature = getFeature(featureId)
   if (!feature) return
@@ -333,6 +387,34 @@ export function deleteFeature(featureId: number) {
     // ignore
   }
   getDb().prepare('DELETE FROM features WHERE id = ?').run(featureId)
+}
+
+async function removeFeatureWorktree(repoPath: string, worktreePath: string) {
+  const git = simpleGit(repoPath)
+  try {
+    await git.raw(['worktree', 'remove', '--force', worktreePath])
+  } catch {
+    if (fs.existsSync(worktreePath)) fs.rmSync(worktreePath, { recursive: true, force: true })
+  }
+}
+
+async function nextAvailableFeatureBranch(repoPath: string, base: string): Promise<string> {
+  if (!(await branchExists(repoPath, base))) return base
+  for (let index = 2; index < 100; index++) {
+    const candidate = `${base}-${index}`
+    if (!(await branchExists(repoPath, candidate))) return candidate
+  }
+  return `${base}-${Date.now()}`
+}
+
+function resetSessionBaselinesForRepo(featureId: number, repoId: number, baseSha: string) {
+  const sessions = getDb()
+    .prepare('SELECT id FROM feature_sessions WHERE feature_id = ?')
+    .all(featureId) as { id: number }[]
+  const stmt = getDb().prepare(
+    'INSERT OR REPLACE INTO feature_session_baselines(session_id, repo_id, base_sha) VALUES(?,?,?)'
+  )
+  for (const session of sessions) stmt.run(session.id, repoId, baseSha)
 }
 
 // ── Session management ──────────────────────────────────────────────────────

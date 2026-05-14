@@ -64,6 +64,7 @@ export default function FeatureChangesPanel({
   const [commitMsg, setCommitMsg] = useState('')
   const [commitError, setCommitError] = useState<string | null>(null)
   const [commitResult, setCommitResult] = useState<FeatureCommitResult[] | null>(null)
+  const [rebranchRepo, setRebranchRepo] = useState<FeatureRepoChanges | null>(null)
 
   const totalFiles = useMemo(() => changes.reduce((n, r) => n + r.files.length, 0), [changes])
   const totalAdds = useMemo(
@@ -332,26 +333,37 @@ export default function FeatureChangesPanel({
             const open = !collapsed[repo.repoId]
             return (
               <section key={repo.repoId} className="border-b border-border/60">
-                <button
-                  onClick={() =>
-                    setCollapsed((prev) => ({ ...prev, [repo.repoId]: !prev[repo.repoId] }))
-                  }
-                  className="w-full flex items-center gap-2 px-3 py-2 hover:bg-panel/60 text-left"
-                >
-                  <span className={cn('text-muted text-[10px] transition-transform', open && 'rotate-90')}>
-                    ▶
-                  </span>
-                  <span className="text-xs flex-1 truncate">{repo.repoName}</span>
-                  {repo.commitsAhead > 0 && (
-                    <span className="text-[10px] text-accent tabular-nums">
-                      {repo.commitsAhead} ahead
+                <div className="flex items-center gap-2 px-3 py-2 hover:bg-panel/60">
+                  <button
+                    onClick={() =>
+                      setCollapsed((prev) => ({ ...prev, [repo.repoId]: !prev[repo.repoId] }))
+                    }
+                    className="min-w-0 flex flex-1 items-center gap-2 text-left"
+                  >
+                    <span className={cn('text-muted text-[10px] transition-transform', open && 'rotate-90')}>
+                      ▶
                     </span>
-                  )}
-                  <span className="text-[10px] text-muted tabular-nums">{visible.length}</span>
-                  {repo.prNumber && (
-                    <Pill tone="open">PR #{repo.prNumber}</Pill>
-                  )}
-                </button>
+                    <span className="text-xs flex-1 truncate">{repo.repoName}</span>
+                    <span className="hidden xl:inline text-[10px] text-muted truncate">
+                      {repo.branch} · base {repo.baseBranch}
+                    </span>
+                    {repo.commitsAhead > 0 && (
+                      <span className="text-[10px] text-accent tabular-nums">
+                        {repo.commitsAhead} ahead
+                      </span>
+                    )}
+                    <span className="text-[10px] text-muted tabular-nums">{visible.length}</span>
+                    {repo.prNumber && (
+                      <Pill tone="open">PR #{repo.prNumber}</Pill>
+                    )}
+                  </button>
+                  <button
+                    onClick={() => setRebranchRepo(repo)}
+                    className="no-drag rounded border border-border bg-panel px-1.5 py-0.5 text-[10px] text-muted hover:text-text hover:bg-[#1d1d1d]"
+                  >
+                    Continue
+                  </button>
+                </div>
                 {open && (
                   <ul>
                     {visible.length === 0 && (
@@ -396,7 +408,137 @@ export default function FeatureChangesPanel({
           onClose={() => setSelected(null)}
         />
       )}
+      {rebranchRepo && (
+        <RebranchRepoModal
+          featureId={featureId}
+          repo={rebranchRepo}
+          onClose={() => setRebranchRepo(null)}
+          onDone={() => {
+            setRebranchRepo(null)
+            void qc.invalidateQueries({ queryKey: ['feature-changes', featureId] })
+            void qc.invalidateQueries({ queryKey: ['feature-repos', featureId] })
+            void qc.invalidateQueries({ queryKey: ['feature', featureId] })
+          }}
+        />
+      )}
     </div>
+  )
+}
+
+function RebranchRepoModal({
+  featureId,
+  repo,
+  onClose,
+  onDone
+}: {
+  featureId: number
+  repo: FeatureRepoChanges
+  onClose: () => void
+  onDone: () => void
+}) {
+  const [baseBranch, setBaseBranch] = useState(repo.baseBranch)
+  const [branches, setBranches] = useState<string[]>([repo.baseBranch])
+  const [discard, setDiscard] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    window.api.features
+      .listRepoBranches(repo.repoId)
+      .then((items) => {
+        if (!cancelled) {
+          setBranches(Array.from(new Set([repo.baseBranch, ...items])).filter(Boolean))
+        }
+      })
+      .catch(() => {
+        // Keep current base as the only option if branch discovery fails.
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [repo.baseBranch, repo.repoId])
+
+  async function rebranch() {
+    setBusy(true)
+    setError(null)
+    try {
+      await window.api.features.rebranchRepo({
+        featureId,
+        repoId: repo.repoId,
+        baseBranch,
+        force: discard
+      })
+      onDone()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'failed to continue repo from base')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <Modal onClose={busy ? () => {} : onClose}>
+      <Card className="w-[460px] p-4">
+        <div className="text-xs uppercase tracking-wider text-muted mb-1">
+          Continue repo from base
+        </div>
+        <h3 className="text-base mb-2">{repo.repoName}</h3>
+        <p className="text-xs leading-5 text-muted mb-4">
+          This removes this feature's current worktree checkout for the repo and creates a new
+          feature branch from the selected base. The old branch is left alone, and the old PR link
+          is cleared for this repo.
+        </p>
+        <label className="block mb-3">
+          <div className="mb-1 text-[10px] uppercase tracking-wider text-muted">Base branch</div>
+          <select
+            value={baseBranch}
+            onChange={(e) => setBaseBranch(e.target.value)}
+            disabled={busy}
+            className="no-drag w-full rounded-md bg-panel border border-border px-2.5 py-1.5 text-sm outline-none focus:border-accent"
+          >
+            {branches.map((branch) => (
+              <option key={branch} value={branch}>
+                {branch}
+              </option>
+            ))}
+          </select>
+        </label>
+        <div className="rounded-md border border-border bg-bg px-3 py-2 text-[11px] leading-5 text-muted">
+          Current branch: <span className="font-mono text-text/80">{repo.branch}</span>
+          <br />
+          New branch: <span className="font-mono text-text/80">next available feature branch</span>
+        </div>
+        {repo.hasUncommitted && (
+          <label className="mt-3 flex items-start gap-2 rounded-md border border-amber-400/30 bg-amber-400/10 px-3 py-2 text-xs text-amber-100">
+            <input
+              type="checkbox"
+              checked={discard}
+              onChange={(e) => setDiscard(e.target.checked)}
+              disabled={busy}
+              className="mt-0.5 accent-accent"
+            />
+            <span>
+              Discard uncommitted changes in this repo worktree. Committed work and the old branch
+              remain in git.
+            </span>
+          </label>
+        )}
+        {error && <div className="mt-3 text-xs text-red-300">{error}</div>}
+        <div className="mt-4 flex justify-end gap-2">
+          <Button onClick={onClose} disabled={busy}>
+            Cancel
+          </Button>
+          <Button
+            variant="primary"
+            onClick={rebranch}
+            disabled={busy || !baseBranch.trim() || (repo.hasUncommitted && !discard)}
+          >
+            {busy ? 'Continuing...' : 'Continue from base'}
+          </Button>
+        </div>
+      </Card>
+    </Modal>
   )
 }
 

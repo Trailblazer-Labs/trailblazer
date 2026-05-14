@@ -1,10 +1,9 @@
 import { useEffect, useState } from 'react'
 import { Button, Input, Card } from '../components/ui'
 import { useApp } from '../stores/app'
-import EnginePicker from '../components/EnginePicker'
 import type { Engine, EngineDetection, GhAuthEvent } from '@shared/types'
 
-type Step = 'auth' | 'engine' | 'done'
+type Step = 'auth' | 'done'
 
 export default function Onboarding() {
   const [step, setStep] = useState<Step>('auth')
@@ -13,8 +12,6 @@ export default function Onboarding() {
   // engine state
   const [detect, setDetect] = useState<EngineDetection | null>(null)
   const [engine, setEngine] = useState<Engine | null>(null)
-  const [engineBusy, setEngineBusy] = useState(false)
-  const [engineError, setEngineError] = useState<string | null>(null)
 
   useEffect(() => {
     window.api.config.detectEngines().then((d) => {
@@ -24,22 +21,16 @@ export default function Onboarding() {
     })
   }, [])
 
-  async function saveEngine() {
-    if (!engine || !detect) return
-    if (!detect[engine].found) {
-      setEngineError(`${engine} CLI not found on PATH`)
-      return
-    }
-    setEngineBusy(true)
-    setEngineError(null)
+  async function finishSetup() {
     try {
-      await window.api.config.setEngine({ engine, path: detect[engine].path })
+      if (engine && detect?.[engine]?.found) {
+        await window.api.config.setEngine({ engine, path: detect[engine].path })
+      }
       setStep('done')
       setTimeout(() => setView({ kind: 'projects' }), 500)
-    } catch (e) {
-      setEngineError(e instanceof Error ? e.message : 'failed')
-    } finally {
-      setEngineBusy(false)
+    } catch {
+      setStep('done')
+      setTimeout(() => setView({ kind: 'projects' }), 500)
     }
   }
 
@@ -51,28 +42,7 @@ export default function Onboarding() {
 
         <Steps step={step} />
 
-        {step === 'auth' && <AuthStep onDone={() => setStep('engine')} />}
-
-        {step === 'engine' && (
-          <div className="mt-6 space-y-4">
-            <div className="text-sm">Pick your coding agent</div>
-            <EnginePicker
-              detect={detect}
-              selected={engine}
-              onSelect={(e) => {
-                setEngine(e)
-                setEngineError(null)
-              }}
-            />
-            {engineError && <div className="text-red-400 text-xs">{engineError}</div>}
-            <div className="flex justify-between pt-2">
-              <Button onClick={() => setStep('auth')}>Back</Button>
-              <Button variant="primary" disabled={engineBusy || !engine} onClick={saveEngine}>
-                {engineBusy ? 'Saving…' : 'Finish'}
-              </Button>
-            </div>
-          </div>
-        )}
+        {step === 'auth' && <AuthStep onDone={() => void finishSetup()} />}
 
         {step === 'done' && (
           <div className="mt-6 text-sm text-muted">All set. Loading your projects…</div>
@@ -248,8 +218,7 @@ function AuthStep({ onDone }: { onDone: () => void }) {
         <>
           <div className="text-sm">Use a Personal Access Token</div>
           <div className="text-xs text-muted">
-            Paste a token with <code>repo</code> scope. Stored locally and encrypted with your OS
-            keychain.
+            Paste a token with <code>repo</code> scope. Stored locally in Trailblazer's app data.
           </div>
           <Input
             type="password"
@@ -281,7 +250,6 @@ function AuthStep({ onDone }: { onDone: () => void }) {
 function Steps({ step }: { step: Step }) {
   const items: { id: Step; label: string }[] = [
     { id: 'auth', label: 'GitHub' },
-    { id: 'engine', label: 'Engine' },
     { id: 'done', label: 'Done' }
   ]
   const idx = items.findIndex((i) => i.id === step)

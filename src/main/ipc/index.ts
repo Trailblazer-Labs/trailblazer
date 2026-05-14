@@ -426,6 +426,18 @@ export function registerIpc(win: BrowserWindow) {
     ) => features.importFeature(args)
   )
   ipcMain.handle(IPC.featuresDelete, (_e, featureId: number) => features.deleteFeature(featureId))
+  ipcMain.handle(
+    IPC.featuresRebranchRepo,
+    (
+      _e,
+      args: {
+        featureId: number
+        repoId: number
+        baseBranch: string
+        force?: boolean
+      }
+    ) => features.rebranchFeatureRepo(args)
+  )
   ipcMain.handle(IPC.featuresListMessages, (_e, sessionId: number) =>
     featureRunner.listMessages(sessionId)
   )

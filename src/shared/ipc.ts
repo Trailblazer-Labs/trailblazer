@@ -76,6 +76,7 @@ export const IPC = {
   featuresCommitPublish: 'features:commit-publish',
   featuresPublish: 'features:publish',
   featuresPull: 'features:pull',
+  featuresRebranchRepo: 'features:rebranch-repo',
   featuresDevRun: 'features:dev-run',
   featuresDevRunProfile: 'features:dev-run-profile',
   featuresDevRunSetup: 'features:dev-run-setup',

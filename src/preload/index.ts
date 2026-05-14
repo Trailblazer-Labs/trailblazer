@@ -281,6 +281,12 @@ const api = {
       ipcRenderer.invoke(IPC.featuresPublish, featureId),
     pull: (featureId: number): Promise<FeatureCommitResult[]> =>
       ipcRenderer.invoke(IPC.featuresPull, featureId),
+    rebranchRepo: (args: {
+      featureId: number
+      repoId: number
+      baseBranch: string
+      force?: boolean
+    }): Promise<FeatureRepo> => ipcRenderer.invoke(IPC.featuresRebranchRepo, args),
     runDevCommand: (args: {
       featureId: number
       repoId: number
