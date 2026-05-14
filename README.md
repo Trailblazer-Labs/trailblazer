@@ -10,6 +10,7 @@
     <a href="#download">Download</a> ·
     <a href="#quick-start">Quick Start</a> ·
     <a href="#features">Features</a> ·
+    <a href="#planning">Planning</a> ·
     <a href="#building-from-source">Build</a>
   </p>
 </div>
@@ -60,6 +61,18 @@ The feature view is a chat. Each turn streams the agent's reasoning, tool calls 
 Bash, Grep…), and file changes in real time. Run multiple **sessions** in parallel for the
 same feature — each one keeps its own conversation history, its own checkpoint baseline,
 and resumes via the engine's native session id (`claude --resume`, `codex exec --resume`).
+
+### Planning
+
+Draft plans before creating branches. The **Planning** tab gives each project a lightweight
+markdown workspace for scope, milestones, decisions, risks, and acceptance criteria. The planning
+agent can inspect the project repos, suggest implementation shape, update the plan, and turn a
+plan into a feature when it is ready.
+
+<!-- TODO: screenshot of Planning tab -->
+<p align="center">
+  <img src="docs/planning.png" width="900" alt="Planning tab" />
+</p>
 
 ### Issues to PRs
 
@@ -145,6 +158,7 @@ See [all releases](https://github.com/Trailblazer-Labs/trailblazer/releases) for
 3. **Create a project** and pick the repositories it spans.
 4. Either:
    - Open the **Features** tab → **New feature** → pick repos and chat your way through it.
+   - Open the **Planning** tab → draft a plan, ask the planning agent for gaps, then turn it into a feature.
    - Open the **Issues** tab → **+ Add Issue** to file, or pick one and click **Resolve**.
 5. When you're happy with the work, **Create PRs** opens one PR per repo.
 
