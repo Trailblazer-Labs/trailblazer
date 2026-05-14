@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Button } from '../components/ui'
 import { useApp } from '../stores/app'
@@ -65,6 +65,18 @@ export default function FeatureChatView({
     return () => window.clearInterval(t)
   }, [running])
   const [liveActivities, setLiveActivities] = useState<AgentActivity[]>([])
+  const liveAssistantText = useMemo(
+    () =>
+      liveActivities
+        .filter((a) => a.kind === 'message' && a.label.trim())
+        .map((a) => a.label.trim())
+        .join('\n\n'),
+    [liveActivities]
+  )
+  const visibleLiveActivities = useMemo(
+    () => liveActivities.filter((a) => a.kind !== 'message' && a.kind !== 'final'),
+    [liveActivities]
+  )
   const [perRepoSummary, setPerRepoSummary] = useState<RepoSummary[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [prResults, setPrResults] = useState<PRCreateResult[] | null>(null)
@@ -347,6 +359,16 @@ export default function FeatureChatView({
           {messages.map((m) => (
             <MessageBubble key={m.id} message={m} />
           ))}
+          {agentRunning && liveAssistantText && (
+            <div className="max-w-3xl mx-auto">
+              <div className="text-[10px] uppercase tracking-wider text-muted mb-1">Agent</div>
+              <div className="rounded-lg border border-border bg-bg/40 px-4 py-3">
+                <article className="tb-prose">
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{liveAssistantText}</ReactMarkdown>
+                </article>
+              </div>
+            </div>
+          )}
           {agentRunning && (
             <div className="max-w-3xl mx-auto">
               <div className="mb-2 flex items-center gap-2 text-[10px] uppercase tracking-wider text-muted">
@@ -364,7 +386,7 @@ export default function FeatureChatView({
                 )}
               </div>
               <ChatActivityStream
-                items={liveActivities}
+                items={visibleLiveActivities}
                 busy
                 emptyLabel={
                   runStartedAt && now - runStartedAt > 5000
