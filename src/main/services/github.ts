@@ -34,26 +34,31 @@ export async function validatePat(token: string): Promise<{ login: string } | { 
 }
 
 export async function searchRepos(q: string): Promise<RepoSearchResult[]> {
-  if (!q.trim()) {
-    const res = await octokit().repos.listForAuthenticatedUser({ per_page: 30, sort: 'updated' })
-    return res.data.map((r) => ({
-      owner: r.owner!.login,
-      name: r.name,
-      fullName: r.full_name,
-      defaultBranch: r.default_branch ?? 'main',
-      description: r.description,
-      private: r.private
-    }))
-  }
-  const res = await octokit().search.repos({ q: `${q} user:@me fork:true`, per_page: 20 })
-  return res.data.items.map((r) => ({
+  const query = q.trim().toLowerCase()
+  const repos = await octokit().paginate(octokit().repos.listForAuthenticatedUser, {
+    per_page: 100,
+    sort: 'updated',
+    affiliation: 'owner,collaborator,organization_member'
+  })
+  return repos
+    .filter((r) => {
+      if (!query) return true
+      return (
+        r.name.toLowerCase().includes(query) ||
+        r.full_name.toLowerCase().includes(query) ||
+        r.owner?.login.toLowerCase().includes(query) ||
+        (r.description ?? '').toLowerCase().includes(query)
+      )
+    })
+    .slice(0, query ? 50 : 30)
+    .map((r) => ({
     owner: r.owner!.login,
     name: r.name,
     fullName: r.full_name,
     defaultBranch: r.default_branch ?? 'main',
     description: r.description,
     private: r.private
-  }))
+    }))
 }
 
 const PER_PAGE = 50

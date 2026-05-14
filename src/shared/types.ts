@@ -26,11 +26,15 @@ export interface Feature {
   status: 'active' | 'archived' | 'merged'
   workspacePath: string
   createdAt: string
+  repoCount?: number
+  mergedRepoCount?: number
+  prRepoCount?: number
 }
 
 export interface Plan {
   id: number
   projectId: number
+  featureId: number | null
   title: string
   content: string
   createdAt: string
@@ -118,6 +122,70 @@ export type FeatureRunEvent =
     }
   | { type: 'error'; featureId: number; message: string }
 
+export type FeatureDevCommandEvent =
+  | {
+      type: 'start'
+      featureId: number
+      commandId: string
+      repoId: number
+      repoName: string
+      command: string
+      cwd: string
+    }
+  | {
+      type: 'output'
+      featureId: number
+      commandId: string
+      stream: 'stdout' | 'stderr'
+      chunk: string
+    }
+  | {
+      type: 'exit'
+      featureId: number
+      commandId: string
+      code: number | null
+    }
+  | {
+      type: 'error'
+      featureId: number
+      commandId: string
+      message: string
+    }
+
+export interface DevProfile {
+  id: number
+  projectId: number
+  name: string
+  repoId: number
+  repoName: string
+  cwd: string
+  setupCommand: string | null
+  devCommand: string
+  env: Record<string, string>
+  createdAt: string
+  updatedAt: string
+}
+
+export interface DevProfileInput {
+  id?: number
+  name: string
+  repoId: number
+  cwd: string
+  setupCommand: string | null
+  devCommand: string
+  env: Record<string, string>
+}
+
+export interface DevSetupState {
+  profileId: number
+  featureId: number
+  dependencyHash: string
+  status: 'missing' | 'stale' | 'running' | 'passed' | 'failed'
+  lastSetupAt: string | null
+  exitCode: number | null
+  logs: string
+}
+
 export interface FeatureChangedFile {
   path: string
   status: 'added' | 'modified' | 'deleted' | 'renamed'
@@ -142,7 +210,7 @@ export interface FeatureRepoChanges {
 export interface FeatureCommitResult {
   repoId: number
   repoName: string
-  status: 'committed' | 'clean' | 'published' | 'failed'
+  status: 'committed' | 'clean' | 'published' | 'pulled' | 'failed'
   sha?: string
   filesCommitted?: number
   error?: string
@@ -192,6 +260,14 @@ export interface Run {
   prNumber: number | null
   startedAt: string
   endedAt: string | null
+}
+
+export interface ActiveIssueRun {
+  run: Run
+  repoOwner: string
+  repoName: string
+  issueNumber: number
+  issueTitle: string
 }
 
 export type Engine = 'claude' | 'codex'

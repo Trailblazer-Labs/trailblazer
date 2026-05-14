@@ -15,17 +15,7 @@
 </div>
 
 > [!IMPORTANT]
-> **Trailblazer is in preview.** Builds are currently **unsigned** while signing certificates are being set up, so macOS and Windows will block them on first launch. One-time bypass per platform:
->
-> **macOS** — after dragging `Trailblazer.app` to Applications, run once in Terminal:
-> ```bash
-> xattr -dr com.apple.quarantine /Applications/Trailblazer.app
-> ```
-> Then open the app normally. (Skipping this gives a "Trailblazer is damaged" error — it's not, it's just unsigned.)
->
-> **Windows** — SmartScreen will warn on the first launch. Click **More info** → **Run anyway**.
->
-> Expect a few rough edges. Bug reports and PRs welcome.
+> **Trailblazer is in preview.** Expect a few rough edges. Bug reports and PRs welcome.
 
 ---
 
@@ -204,10 +194,7 @@ npm run release:win
 ```
 
 The in-app updater allows prereleases so beta users can move forward without reinstalling
-manually. Production update installs should use signed builds, especially on macOS and Windows.
-Configure the `CSC_LINK` and `CSC_KEY_PASSWORD` repository secrets for code signing. Add the
-Apple notarization secrets `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`, and `APPLE_TEAM_ID` for
-signed macOS releases.
+manually.
 
 ### Generating icons
 

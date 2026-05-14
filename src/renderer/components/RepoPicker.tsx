@@ -14,15 +14,22 @@ export default function RepoPicker({
   const [q, setQ] = useState('')
   const [results, setResults] = useState<RepoSearchResult[]>([])
   const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
   const disabled = new Set(disabledFullNames)
 
   useEffect(() => {
     let cancelled = false
     setLoading(true)
+    setError(null)
     const t = setTimeout(async () => {
       try {
         const r = await window.api.github.searchRepos(q)
         if (!cancelled) setResults(r)
+      } catch (e) {
+        if (!cancelled) {
+          setResults([])
+          setError(e instanceof Error ? e.message : 'Repository search failed')
+        }
       } finally {
         if (!cancelled) setLoading(false)
       }
@@ -49,7 +56,10 @@ export default function RepoPicker({
       />
       <div className="max-h-64 overflow-auto rounded-md border border-border bg-bg">
         {loading && <div className="text-xs text-muted px-3 py-2">Searching…</div>}
-        {!loading && results.length === 0 && (
+        {!loading && error && (
+          <div className="text-xs text-red-300 px-3 py-2">{error}</div>
+        )}
+        {!loading && !error && results.length === 0 && (
           <div className="text-xs text-muted px-3 py-2">No repositories.</div>
         )}
         {results.map((r) => {

@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { cn } from '../lib/cn'
 import { Modal } from './NewIssueModal'
@@ -7,7 +7,11 @@ import DiffView from './DiffView'
 import type {
   FeatureChangedFile,
   FeatureCommitResult,
-  FeatureRepoChanges
+  FeatureDevCommandEvent,
+  FeatureRepo,
+  FeatureRepoChanges,
+  DevProfile,
+  DevSetupState
 } from '@shared/types'
 
 type Scope = 'session' | 'overall'
@@ -33,7 +37,19 @@ export default function FeatureChangesPanel({
       }),
     refetchOnMount: 'always'
   })
-
+  const { data: featureRepos = [] } = useQuery<FeatureRepo[]>({
+    queryKey: ['feature-repos', featureId],
+    queryFn: () => window.api.features.listRepos(featureId)
+  })
+  const { data: feature } = useQuery({
+    queryKey: ['feature', featureId],
+    queryFn: () => window.api.features.get(featureId)
+  })
+  const { data: devProfiles = [] } = useQuery<DevProfile[]>({
+    queryKey: ['dev-profiles', feature?.projectId],
+    queryFn: () => window.api.devProfiles.list(feature!.projectId),
+    enabled: !!feature
+  })
   const [filter, setFilter] = useState('')
   const [selected, setSelected] = useState<{
     repo: FeatureRepoChanges
@@ -43,6 +59,7 @@ export default function FeatureChangesPanel({
   const [committing, setCommitting] = useState(false)
   const [publishing, setPublishing] = useState(false)
   const [pushing, setPushing] = useState(false)
+  const [pulling, setPulling] = useState(false)
   const [showCommit, setShowCommit] = useState(false)
   const [commitMsg, setCommitMsg] = useState('')
   const [commitError, setCommitError] = useState<string | null>(null)
@@ -119,6 +136,21 @@ export default function FeatureChangesPanel({
     }
   }
 
+  async function pull() {
+    setPulling(true)
+    setCommitError(null)
+    try {
+      const result = await window.api.features.pull(featureId)
+      setCommitResult(result)
+      void qc.invalidateQueries({ queryKey: ['feature-changes', featureId] })
+      void qc.invalidateQueries({ queryKey: ['feature-repos', featureId] })
+    } catch (e) {
+      setCommitError(e instanceof Error ? e.message : 'pull failed')
+    } finally {
+      setPulling(false)
+    }
+  }
+
   return (
     <div className="h-full flex flex-col bg-bg/40">
       <header className="border-b border-border shrink-0">
@@ -172,10 +204,17 @@ export default function FeatureChangesPanel({
             </div>
           )}
           <div className="flex-1" />
+          <button
+            onClick={pull}
+            disabled={committing || publishing || pushing || pulling}
+            className="no-drag h-7 px-2.5 rounded-md border border-border bg-panel text-[11px] text-muted hover:text-text hover:bg-[#1d1d1d] disabled:opacity-50"
+          >
+            {pulling ? 'Pulling...' : 'Pull'}
+          </button>
           {hasUncommitted && (
             <button
               onClick={() => setShowCommit((v) => !v)}
-              disabled={committing || publishing || pushing}
+              disabled={committing || publishing || pushing || pulling}
               className="no-drag h-7 px-2.5 rounded-md border border-accent/40 bg-[#1a1414] text-[11px] text-accent hover:bg-[#221212] disabled:opacity-50"
             >
               {publishing ? 'Publishing…' : committing ? 'Committing…' : 'Commit'}
@@ -184,7 +223,7 @@ export default function FeatureChangesPanel({
           {!hasUncommitted && hasPendingCommits && (
             <button
               onClick={publish}
-              disabled={pushing}
+              disabled={committing || publishing || pushing || pulling}
               className="no-drag h-7 px-2.5 rounded-md border border-accent/40 bg-[#1a1414] text-[11px] text-accent hover:bg-[#221212] disabled:opacity-50"
             >
               {pushing ? 'Pushing…' : 'Push'}
@@ -246,6 +285,8 @@ export default function FeatureChangesPanel({
                       ? 'bg-green-400'
                       : r.status === 'published'
                         ? 'bg-accent'
+                      : r.status === 'pulled'
+                        ? 'bg-blue-400'
                       : r.status === 'failed'
                         ? 'bg-red-400'
                         : 'bg-muted/40'
@@ -276,12 +317,14 @@ export default function FeatureChangesPanel({
       </div>
 
       <div className="flex-1 overflow-auto">
-        {changes.length === 0 ? (
-          <div className="px-3 py-8 text-center text-[11px] text-muted">
-            No changes yet. Send a prompt and the agent will write to these branches.
-          </div>
-        ) : (
-          changes.map((repo) => {
+        <>
+          {changes.length === 0 ? (
+            <div className="px-3 py-8 text-center text-[11px] text-muted">
+              No changes yet. Send a prompt and the agent will write to these branches.
+            </div>
+          ) : (
+            <>
+          {changes.map((repo) => {
             const visible = repo.files.filter((f) =>
               filter ? f.path.toLowerCase().includes(filter.toLowerCase()) : true
             )
@@ -339,8 +382,11 @@ export default function FeatureChangesPanel({
                 )}
               </section>
             )
-          })
-        )}
+          })}
+            </>
+          )}
+        </>
+        <DevConsole featureId={featureId} repos={featureRepos} profiles={devProfiles} />
       </div>
 
       {selected && (
@@ -351,6 +397,262 @@ export default function FeatureChangesPanel({
         />
       )}
     </div>
+  )
+}
+
+function DevConsole({
+  featureId,
+  repos,
+  profiles
+}: {
+  featureId: number
+  repos: FeatureRepo[]
+  profiles: DevProfile[]
+}) {
+  const storageKey = `feature-dev-command:${featureId}`
+  const [repoId, setRepoId] = useState<number | null>(repos[0]?.repoId ?? null)
+  const [cwd, setCwd] = useState('.')
+  const [command, setCommand] = useState(() => {
+    if (typeof window === 'undefined') return ''
+    return window.localStorage.getItem(storageKey) ?? ''
+  })
+  const [running, setRunning] = useState(false)
+  const [logs, setLogs] = useState('')
+  const [error, setError] = useState<string | null>(null)
+  const [selectedProfileId, setSelectedProfileId] = useState<number | null>(profiles[0]?.id ?? null)
+  const logRef = useRef<HTMLPreElement>(null)
+  const selectedProfile = profiles.find((profile) => profile.id === selectedProfileId) ?? null
+  const { data: setupState, refetch: refetchSetupState } = useQuery<DevSetupState>({
+    queryKey: ['dev-setup-state', featureId, selectedProfileId],
+    queryFn: () =>
+      window.api.features.getDevSetupState({
+        featureId,
+        profileId: selectedProfileId!
+      }),
+    enabled: !!selectedProfileId,
+    refetchInterval: 2000
+  })
+
+  useEffect(() => {
+    if (repoId === null && repos[0]) setRepoId(repos[0].repoId)
+  }, [repoId, repos])
+
+  useEffect(() => {
+    if (selectedProfileId === null && profiles[0]) setSelectedProfileId(profiles[0].id)
+    if (selectedProfileId !== null && !profiles.some((profile) => profile.id === selectedProfileId)) {
+      setSelectedProfileId(profiles[0]?.id ?? null)
+    }
+  }, [profiles, selectedProfileId])
+
+  useEffect(() => {
+    window.localStorage.setItem(storageKey, command)
+  }, [command, storageKey])
+
+  useEffect(() => {
+    const unsub = window.api.features.onDevEvent((evt: FeatureDevCommandEvent) => {
+      if (evt.featureId !== featureId) return
+      if (evt.type === 'start') {
+        setRunning(true)
+        setError(null)
+        setLogs((current) =>
+          `${current}${current ? '\n' : ''}$ ${evt.command}\n# cwd: ${evt.cwd}\n`
+        )
+      } else if (evt.type === 'output') {
+        setLogs((current) => current + evt.chunk)
+      } else if (evt.type === 'exit') {
+        setRunning(false)
+        setLogs((current) => `${current}\n# exited with code ${evt.code ?? 'null'}\n`)
+      } else if (evt.type === 'error') {
+        setRunning(false)
+        setError(evt.message)
+        setLogs((current) => `${current}\n# error: ${evt.message}\n`)
+      }
+    })
+    return unsub
+  }, [featureId])
+
+  useEffect(() => {
+    if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight
+  }, [logs])
+
+  async function start() {
+    if (!repoId || !command.trim()) return
+    setError(null)
+    setLogs('')
+    try {
+      await window.api.features.runDevCommand({
+        featureId,
+        repoId,
+        cwd,
+        command
+      })
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'failed to start command')
+    }
+  }
+
+  async function runSetup() {
+    if (!selectedProfile) return
+    setError(null)
+    setLogs('')
+    try {
+      await window.api.features.runDevSetup({ featureId, profileId: selectedProfile.id })
+      void refetchSetupState()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'failed to run setup')
+    }
+  }
+
+  async function startProfile() {
+    if (!selectedProfile) return
+    setError(null)
+    setLogs('')
+    try {
+      await window.api.features.runDevProfile({ featureId, profileId: selectedProfile.id })
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'failed to start dev command')
+    }
+  }
+
+  async function stop() {
+    await window.api.features.stopDevCommand(featureId)
+  }
+
+  return (
+    <section className="border-t border-border/80 px-3 py-3 space-y-2">
+      <div className="flex items-center justify-between gap-2">
+        <div>
+          <div className="text-[10px] uppercase tracking-wider text-muted">Dev console</div>
+          <div className="text-[11px] text-muted">Run a long-lived command in a feature worktree.</div>
+        </div>
+        {running && <span className="tb-pulse h-2 w-2 rounded-full bg-amber-300" />}
+      </div>
+      {profiles.length > 0 && (
+        <div className="rounded-md border border-border bg-panel/50 p-2 space-y-2">
+          <select
+            value={selectedProfileId ?? ''}
+            onChange={(e) => setSelectedProfileId(Number(e.target.value))}
+            disabled={running}
+            className="no-drag w-full rounded bg-bg border border-border px-2 py-1 text-[11px] outline-none"
+          >
+            {profiles.map((profile) => (
+              <option key={profile.id} value={profile.id}>
+                {profile.name}
+              </option>
+            ))}
+          </select>
+          {selectedProfile && (
+            <>
+              <div className="text-[10px] text-muted leading-4">
+                {selectedProfile.repoName} / {selectedProfile.cwd || '.'}
+                {setupState && (
+                  <>
+                    {' '}
+                    · setup {setupState.status}
+                  </>
+                )}
+              </div>
+              <div className="flex gap-1.5">
+                {selectedProfile.setupCommand && (
+                  <button
+                    onClick={runSetup}
+                    disabled={running}
+                    className="no-drag h-7 px-2 rounded border border-border bg-bg text-[11px] text-muted hover:text-text disabled:opacity-50"
+                  >
+                    {setupState?.status === 'running' ? 'Setting up...' : 'Run setup'}
+                  </button>
+                )}
+                {running ? (
+                  <button
+                    onClick={stop}
+                    className="no-drag h-7 px-2 rounded border border-red-900/70 bg-red-950/30 text-[11px] text-red-200 hover:bg-red-950/50"
+                  >
+                    Stop
+                  </button>
+                ) : (
+                  <button
+                    onClick={startProfile}
+                    disabled={
+                      !!selectedProfile.setupCommand &&
+                      setupState?.status !== 'passed'
+                    }
+                    className="no-drag h-7 px-2 rounded border border-accent/40 bg-[#1a1414] text-[11px] text-accent hover:bg-[#221212] disabled:opacity-50"
+                  >
+                    Start dev
+                  </button>
+                )}
+              </div>
+              {setupState?.logs && (
+                <details className="rounded border border-border/60 bg-bg">
+                  <summary className="cursor-pointer px-2 py-1 text-[10px] text-muted hover:text-text">
+                    Setup logs
+                  </summary>
+                  <pre className="max-h-32 overflow-auto whitespace-pre-wrap px-2 pb-2 text-[10px] leading-4 text-text/70">
+                    {setupState.logs}
+                  </pre>
+                </details>
+              )}
+            </>
+          )}
+        </div>
+      )}
+      <div className="grid grid-cols-[minmax(0,1fr)_80px] gap-1.5">
+        <select
+          value={repoId ?? ''}
+          onChange={(e) => setRepoId(Number(e.target.value))}
+          disabled={running}
+          className="no-drag min-w-0 rounded bg-panel border border-border px-2 py-1 text-[11px] outline-none"
+        >
+          {repos.map((repo) => (
+            <option key={repo.repoId} value={repo.repoId}>
+              {repo.repoName}
+            </option>
+          ))}
+        </select>
+        <input
+          value={cwd}
+          onChange={(e) => setCwd(e.target.value)}
+          disabled={running}
+          placeholder="."
+          className="no-drag rounded bg-panel border border-border px-2 py-1 text-[11px] font-mono outline-none focus:border-accent"
+        />
+      </div>
+      <div className="flex gap-1.5">
+        <input
+          value={command}
+          onChange={(e) => setCommand(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && !running) void start()
+          }}
+          disabled={running}
+          placeholder="npm run dev"
+          className="no-drag min-w-0 flex-1 rounded bg-panel border border-border px-2 py-1 text-[11px] font-mono outline-none focus:border-accent"
+        />
+        {running ? (
+          <button
+            onClick={stop}
+            className="no-drag h-7 px-2.5 rounded-md border border-red-900/70 bg-red-950/30 text-[11px] text-red-200 hover:bg-red-950/50"
+          >
+            Stop
+          </button>
+        ) : (
+          <button
+            onClick={start}
+            disabled={!repoId || !command.trim()}
+            className="no-drag h-7 px-2.5 rounded-md border border-accent/40 bg-[#1a1414] text-[11px] text-accent hover:bg-[#221212] disabled:opacity-50"
+          >
+            Run
+          </button>
+        )}
+      </div>
+      {error && <div className="text-[10px] text-red-300">{error}</div>}
+      <pre
+        ref={logRef}
+        className="h-48 overflow-auto rounded-md border border-border bg-[#0b0b0b] p-2 text-[10px] leading-4 text-text/75 whitespace-pre-wrap"
+      >
+        {logs || 'Console output will appear here.'}
+      </pre>
+    </section>
   )
 }
 
@@ -365,7 +667,8 @@ function resultLabel(r: FeatureCommitResult): string {
         : ''
     return `${committed}published`
   }
-  if (r.status === 'clean') return 'nothing to commit'
+  if (r.status === 'pulled') return 'pulled latest'
+  if (r.status === 'clean') return 'nothing to do'
   return `failed - ${r.error}`
 }
 

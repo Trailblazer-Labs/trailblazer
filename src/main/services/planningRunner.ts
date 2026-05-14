@@ -91,6 +91,12 @@ export function cancelRun(planId: number) {
   if (ctx.proc && !ctx.proc.killed) ctx.proc.kill('SIGTERM')
 }
 
+export function listActivePlanIds(projectId?: number): number[] {
+  const ids = [...inFlight.keys()]
+  if (typeof projectId !== 'number') return ids
+  return ids.filter((planId) => getPlanContext(planId)?.projectId === projectId)
+}
+
 export async function sendPrompt(args: {
   planId: number
   prompt: string

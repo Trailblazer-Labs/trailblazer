@@ -21,6 +21,8 @@ import {
 import type { ModelUseCase } from '@shared/models'
 import * as features from '../services/features'
 import * as featureRunner from '../services/featureRunner'
+import * as featureDevRunner from '../services/featureDevRunner'
+import * as devProfiles from '../services/devProfiles'
 import * as plans from '../services/plans'
 import * as planningRunner from '../services/planningRunner'
 import {
@@ -42,7 +44,14 @@ import {
   getAuthMode,
   setAuthMode
 } from '../services/ghAuth'
-import type { Project, Repo, AppConfig, Engine, PlanPromptAttachment } from '@shared/types'
+import type {
+  Project,
+  Repo,
+  AppConfig,
+  Engine,
+  PlanPromptAttachment,
+  DevProfileInput
+} from '@shared/types'
 
 const TRAILBLAZER_REPO = {
   owner: 'Trailblazer-Labs',
@@ -63,6 +72,9 @@ export function registerIpc(win: BrowserWindow) {
   })
   featureRunner.featureBus.on('event', (evt) => {
     if (!win.isDestroyed()) win.webContents.send(IPC.featuresEvent, evt)
+  })
+  featureDevRunner.featureDevBus.on('event', (evt) => {
+    if (!win.isDestroyed()) win.webContents.send(IPC.featuresDevEvent, evt)
   })
   planningRunner.planBus.on('event', (evt) => {
     if (!win.isDestroyed()) win.webContents.send(IPC.plansEvent, evt)
@@ -184,8 +196,11 @@ export function registerIpc(win: BrowserWindow) {
     getProject(projectId)
   )
 
-  ipcMain.handle(IPC.projectsCreate, (_e, name: string): Project => {
-    const engine = getEngine()
+  ipcMain.handle(
+    IPC.projectsCreate,
+    (_e, args: string | { name: string; assistantEngine?: Engine | null }): Project => {
+    const name = typeof args === 'string' ? args : args.name
+    const engine = typeof args === 'string' ? getEngine() : (args.assistantEngine ?? getEngine())
     const r = getDb()
       .prepare('INSERT INTO projects(name, assistant_engine) VALUES(?,?)')
       .run(name, engine)
@@ -198,7 +213,8 @@ export function registerIpc(win: BrowserWindow) {
       issueExpandModel: null,
       issueResolveModel: null
     }
-  })
+    }
+  )
 
   ipcMain.handle(
     IPC.projectsUpdateSettings,
@@ -335,6 +351,9 @@ export function registerIpc(win: BrowserWindow) {
     plans.deletePlan(planId)
     return { ok: true }
   })
+  ipcMain.handle(IPC.plansListActive, (_e, projectId?: number) =>
+    planningRunner.listActivePlanIds(projectId)
+  )
   ipcMain.handle(
     IPC.plansCreateFeature,
     (
@@ -364,8 +383,13 @@ export function registerIpc(win: BrowserWindow) {
   )
 
   // ── features ─────────────────────────────────────────
-  ipcMain.handle(IPC.featuresList, (_e, projectId: number) => features.listFeatures(projectId))
+  ipcMain.handle(IPC.featuresList, (_e, projectId: number) =>
+    features.listFeaturesWithPrSync(projectId)
+  )
   ipcMain.handle(IPC.featuresGet, (_e, featureId: number) => features.getFeature(featureId))
+  ipcMain.handle(IPC.featuresListActive, (_e, projectId?: number) =>
+    featureRunner.listActiveFeatureIds(projectId)
+  )
   ipcMain.handle(IPC.featuresListRepos, (_e, featureId: number) =>
     features.listFeatureRepos(featureId)
   )
@@ -374,7 +398,15 @@ export function registerIpc(win: BrowserWindow) {
   )
   ipcMain.handle(
     IPC.featuresCreate,
-    (_e, args: { projectId: number; name: string; repoIds: number[] }) =>
+    (
+      _e,
+      args: {
+        projectId: number
+        name: string
+        repoIds: number[]
+        baseBranches?: Record<number, string>
+      }
+    ) =>
       features.createFeature(args)
   )
   ipcMain.handle(
@@ -460,10 +492,44 @@ export function registerIpc(win: BrowserWindow) {
   ipcMain.handle(IPC.featuresPublish, (_e, featureId: number) =>
     featureRunner.publishFeatureBranches(featureId)
   )
+  ipcMain.handle(IPC.featuresPull, (_e, featureId: number) =>
+    featureRunner.pullFeatureBranches(featureId)
+  )
+  ipcMain.handle(
+    IPC.featuresDevRun,
+    (_e, args: { featureId: number; repoId: number; command: string; cwd?: string }) =>
+      featureDevRunner.startDevCommand(args)
+  )
+  ipcMain.handle(
+    IPC.featuresDevRunProfile,
+    (_e, args: { featureId: number; profileId: number }) =>
+      featureDevRunner.startProfileDevCommand(args)
+  )
+  ipcMain.handle(
+    IPC.featuresDevRunSetup,
+    (_e, args: { featureId: number; profileId: number }) =>
+      featureDevRunner.runProfileSetup(args)
+  )
+  ipcMain.handle(
+    IPC.featuresDevSetupState,
+    (_e, args: { featureId: number; profileId: number }) =>
+      devProfiles.getSetupState(args.featureId, args.profileId)
+  )
+  ipcMain.handle(IPC.featuresDevStop, (_e, featureId: number) =>
+    featureDevRunner.stopDevCommand(featureId)
+  )
   ipcMain.handle(IPC.reposSetWorkingBranch, (_e, repoId: number, branch: string | null) => {
     getDb().prepare('UPDATE repos SET working_branch = ? WHERE id = ?').run(branch, repoId)
     return { ok: true }
   })
+  ipcMain.handle(IPC.devProfilesList, (_e, projectId: number) =>
+    devProfiles.listProfiles(projectId)
+  )
+  ipcMain.handle(
+    IPC.devProfilesSave,
+    (_e, projectId: number, profiles: DevProfileInput[]) =>
+      devProfiles.saveProfiles(projectId, profiles)
+  )
   ipcMain.handle(IPC.openExternal, (_e, url: string) => shell.openExternal(url))
 
   // ── runs ─────────────────────────────────────────────
@@ -485,4 +551,5 @@ export function registerIpc(win: BrowserWindow) {
 
   ipcMain.handle(IPC.runsCancel, (_e, runId: string) => runner.cancelRun(runId))
   ipcMain.handle(IPC.runsApprovePush, (_e, runId: string) => runner.approvePush(runId))
+  ipcMain.handle(IPC.runsGetActive, () => runner.getActiveRun())
 }

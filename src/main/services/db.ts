@@ -99,6 +99,29 @@ function migrate(d: Database.Database) {
       ts TEXT NOT NULL DEFAULT (datetime('now'))
     );
     CREATE INDEX IF NOT EXISTS plan_messages_plan_idx ON plan_messages(plan_id, id ASC);
+    CREATE TABLE IF NOT EXISTS dev_profiles (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      name TEXT NOT NULL,
+      repo_id INTEGER NOT NULL REFERENCES repos(id) ON DELETE CASCADE,
+      cwd TEXT NOT NULL DEFAULT '.',
+      setup_command TEXT,
+      dev_command TEXT NOT NULL,
+      env_json TEXT NOT NULL DEFAULT '{}',
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS dev_profiles_project_idx ON dev_profiles(project_id);
+    CREATE TABLE IF NOT EXISTS dev_setup_state (
+      profile_id INTEGER NOT NULL REFERENCES dev_profiles(id) ON DELETE CASCADE,
+      feature_id INTEGER NOT NULL REFERENCES features(id) ON DELETE CASCADE,
+      dependency_hash TEXT NOT NULL,
+      status TEXT NOT NULL,
+      last_setup_at TEXT,
+      exit_code INTEGER,
+      logs TEXT NOT NULL DEFAULT '',
+      PRIMARY KEY(profile_id, feature_id)
+    );
   `)
 
   // Add per-repo working_branch column for the "issues working branch" setting.
@@ -119,6 +142,11 @@ function migrate(d: Database.Database) {
   }
   if (!projectCols.some((c) => c.name === 'issue_resolve_model')) {
     d.exec('ALTER TABLE projects ADD COLUMN issue_resolve_model TEXT')
+  }
+
+  const planCols = d.prepare('PRAGMA table_info(plans)').all() as { name: string }[]
+  if (!planCols.some((c) => c.name === 'feature_id')) {
+    d.exec('ALTER TABLE plans ADD COLUMN feature_id INTEGER REFERENCES features(id) ON DELETE SET NULL')
   }
 
   // ─── feature_sessions: multiple sessions per feature ───────────────────────

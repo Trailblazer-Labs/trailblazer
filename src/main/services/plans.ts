@@ -7,6 +7,7 @@ import type { Plan, PlanFeatureResult } from '@shared/types'
 type PlanRow = {
   id: number
   project_id: number
+  feature_id: number | null
   title: string
   content: string
   created_at: string
@@ -17,6 +18,7 @@ function toPlan(row: PlanRow): Plan {
   return {
     id: row.id,
     projectId: row.project_id,
+    featureId: row.feature_id,
     title: row.title,
     content: row.content,
     createdAt: row.created_at,
@@ -27,7 +29,7 @@ function toPlan(row: PlanRow): Plan {
 export function listPlans(projectId: number): Plan[] {
   const rows = getDb()
     .prepare(
-      `SELECT id, project_id, title, content, created_at, updated_at
+      `SELECT id, project_id, feature_id, title, content, created_at, updated_at
          FROM plans
         WHERE project_id = ?
         ORDER BY updated_at DESC, id DESC`
@@ -39,7 +41,7 @@ export function listPlans(projectId: number): Plan[] {
 export function getPlan(planId: number): Plan | null {
   const row = getDb()
     .prepare(
-      `SELECT id, project_id, title, content, created_at, updated_at
+      `SELECT id, project_id, feature_id, title, content, created_at, updated_at
          FROM plans
         WHERE id = ?`
     )
@@ -101,6 +103,7 @@ export async function createFeatureFromPlan(args: {
 }): Promise<PlanFeatureResult> {
   const plan = getPlan(args.planId)
   if (!plan) throw new Error('Plan not found')
+  if (plan.featureId) throw new Error('Plan has already been turned into a feature')
   const name = args.name.trim()
   if (!name) throw new Error('Feature name is required')
   if (args.repoIds.length === 0) throw new Error('Pick at least one repo')
@@ -111,6 +114,7 @@ export async function createFeatureFromPlan(args: {
     name,
     repoIds: args.repoIds
   })
+  getDb().prepare('UPDATE plans SET feature_id = ? WHERE id = ?').run(feature.id, args.planId)
 
   const planFile = 'plan.md'
   fs.writeFileSync(path.join(feature.workspacePath, planFile), args.content.trimEnd() + '\n')

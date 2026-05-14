@@ -8,7 +8,7 @@ import { Modal } from '../components/NewIssueModal'
 import { FireLogo } from '../components/FireLogo'
 import SettingsModal from '../components/SettingsModal'
 import ProjectAgentSettingsModal from '../components/ProjectAgentSettingsModal'
-import type { Project, Repo, RepoSearchResult } from '@shared/types'
+import type { Engine, EngineDetection, Project, Repo, RepoSearchResult } from '@shared/types'
 
 export default function Projects() {
   const setView = useApp((s) => s.setView)
@@ -491,19 +491,46 @@ function CreateProjectCard({
 }) {
   const [name, setName] = useState('')
   const [picked, setPicked] = useState<RepoSearchResult[]>([])
+  const [detectedEngines, setDetectedEngines] = useState<EngineDetection | null>(null)
+  const [engine, setEngine] = useState<Engine | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const showEnginePicker = !!detectedEngines?.claude.found && !!detectedEngines?.codex.found
 
   useEffect(() => {
     setError(null)
   }, [name, picked])
+
+  useEffect(() => {
+    let cancelled = false
+    Promise.all([window.api.config.detectEngines(), window.api.config.get()])
+      .then(([detected, config]) => {
+        if (cancelled) return
+        setDetectedEngines(detected)
+        if (detected.claude.found && detected.codex.found) {
+          setEngine(config.engine ?? 'codex')
+        } else if (detected.claude.found) {
+          setEngine('claude')
+        } else if (detected.codex.found) {
+          setEngine('codex')
+        } else {
+          setEngine(config.engine)
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setEngine(null)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   async function create() {
     if (!name.trim() || picked.length === 0) return
     setBusy(true)
     setError(null)
     try {
-      const p = await window.api.projects.create(name.trim())
+      const p = await window.api.projects.create(name.trim(), engine)
       for (const r of picked) {
         await window.api.projects.addRepo(p.id, {
           owner: r.owner,
@@ -532,6 +559,25 @@ function CreateProjectCard({
         <div className="text-xs uppercase tracking-wider text-muted mb-2">Repositories</div>
         <RepoPicker selected={picked} onChange={setPicked} />
       </div>
+      {showEnginePicker && (
+        <div>
+          <div className="text-xs uppercase tracking-wider text-muted mb-2">Coding agent</div>
+          <div className="grid grid-cols-2 gap-2">
+            <EngineChoice
+              active={engine === 'codex'}
+              title="Codex"
+              subtitle="OpenAI's coding agent"
+              onClick={() => setEngine('codex')}
+            />
+            <EngineChoice
+              active={engine === 'claude'}
+              title="Claude"
+              subtitle="Anthropic's coding agent"
+              onClick={() => setEngine('claude')}
+            />
+          </div>
+        </div>
+      )}
       {error && <div className="text-red-400 text-xs">{error}</div>}
       <div className="flex justify-end gap-2 pt-1">
         <Button onClick={onClose} disabled={busy}>
@@ -546,5 +592,33 @@ function CreateProjectCard({
         </Button>
       </div>
     </Card>
+  )
+}
+
+function EngineChoice({
+  active,
+  title,
+  subtitle,
+  onClick
+}: {
+  active: boolean
+  title: string
+  subtitle: string
+  onClick: () => void
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={
+        'rounded-lg border px-3 py-2.5 text-left transition-colors ' +
+        (active
+          ? 'border-accent/50 bg-[#1a1414] text-text'
+          : 'border-border bg-bg text-muted hover:border-border/80 hover:bg-panel hover:text-text')
+      }
+    >
+      <div className="text-sm font-medium">{title}</div>
+      <div className="mt-0.5 text-[10px] uppercase tracking-wider text-muted">{subtitle}</div>
+    </button>
   )
 }

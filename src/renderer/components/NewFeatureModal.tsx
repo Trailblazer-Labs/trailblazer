@@ -27,6 +27,7 @@ export default function NewFeatureModal({
   const [importSelections, setImportSelections] = useState<
     Record<number, { kind: 'existing' | 'new'; value: string; baseBranch?: string }>
   >({})
+  const [createBaseBranches, setCreateBaseBranches] = useState<Record<number, string>>({})
 
   const slug = useMemo(() => slugify(name), [name])
 
@@ -49,10 +50,16 @@ export default function NewFeatureModal({
     setError(null)
     try {
       if (mode === 'create') {
+        const baseBranches = selectedIds.reduce<Record<number, string>>((acc, repoId) => {
+          const branch = createBaseBranches[repoId]?.trim()
+          if (branch) acc[repoId] = branch
+          return acc
+        }, {})
         const { feature } = await window.api.features.create({
           projectId,
           name: name.trim(),
-          repoIds: selectedIds
+          repoIds: selectedIds,
+          baseBranches
         })
         onCreated(feature)
       } else {
@@ -102,7 +109,7 @@ export default function NewFeatureModal({
           {mode === 'create' && name.trim() && (
             <div className="text-[11px] text-muted">
               Will create branch <code className="text-accent">feature/{slug}</code> in each selected
-              repo, off the repo's working branch.
+              repo, off the selected base branch.
             </div>
           )}
         </div>
@@ -148,6 +155,16 @@ export default function NewFeatureModal({
                     }
                   />
                 )}
+                {active && mode === 'create' && (
+                  <CreateRepoControls
+                    repoId={r.id}
+                    defaultBase={r.workingBranch ?? r.defaultBranch}
+                    value={createBaseBranches[r.id]}
+                    onChange={(branch) =>
+                      setCreateBaseBranches((prev) => ({ ...prev, [r.id]: branch }))
+                    }
+                  />
+                )}
               </div>
             )
           })}
@@ -190,6 +207,29 @@ function ModeTab({
   )
 }
 
+function CreateRepoControls({
+  repoId,
+  defaultBase,
+  value,
+  onChange
+}: {
+  repoId: number
+  defaultBase: string
+  value?: string
+  onChange: (branch: string) => void
+}) {
+  return (
+    <div className="px-3 pb-3 pl-10">
+      <BaseBranchSelect
+        repoId={repoId}
+        value={value ?? defaultBase}
+        defaultBase={defaultBase}
+        onChange={onChange}
+      />
+    </div>
+  )
+}
+
 function ImportRepoControls({
   repoId,
   defaultBase,
@@ -204,6 +244,7 @@ function ImportRepoControls({
   const [branches, setBranches] = useState<string[] | null>(null)
   const [loading, setLoading] = useState(false)
   const kind = selection?.kind ?? 'existing'
+  const baseBranch = selection?.baseBranch ?? defaultBase
 
   useEffect(() => {
     let cancelled = false
@@ -230,7 +271,7 @@ function ImportRepoControls({
             name={`mode-${repoId}`}
             checked={kind === 'existing'}
             onChange={() =>
-              onChange({ kind: 'existing', value: selection?.value ?? '', baseBranch: defaultBase })
+              onChange({ kind: 'existing', value: selection?.value ?? '', baseBranch })
             }
             className="accent-accent"
           />
@@ -242,7 +283,7 @@ function ImportRepoControls({
             name={`mode-${repoId}`}
             checked={kind === 'new'}
             onChange={() =>
-              onChange({ kind: 'new', value: selection?.value ?? '', baseBranch: defaultBase })
+              onChange({ kind: 'new', value: selection?.value ?? '', baseBranch })
             }
             className="accent-accent"
           />
@@ -254,7 +295,7 @@ function ImportRepoControls({
           className="w-full rounded-md bg-panel border border-border px-2.5 py-1.5 text-xs outline-none"
           value={selection?.value ?? ''}
           onChange={(e) =>
-            onChange({ kind: 'existing', value: e.target.value, baseBranch: defaultBase })
+            onChange({ kind: 'existing', value: e.target.value, baseBranch })
           }
         >
           <option value="" disabled>
@@ -271,12 +312,78 @@ function ImportRepoControls({
           placeholder="new-branch-name"
           value={selection?.value ?? ''}
           onChange={(e) =>
-            onChange({ kind: 'new', value: e.target.value, baseBranch: defaultBase })
+            onChange({ kind: 'new', value: e.target.value, baseBranch })
           }
         />
       )}
-      <div className="text-[10px] text-muted">Base: {defaultBase}</div>
+      <BaseBranchSelect
+        repoId={repoId}
+        value={baseBranch}
+        defaultBase={defaultBase}
+        onChange={(baseBranch) =>
+          onChange({
+            kind,
+            value: selection?.value ?? '',
+            baseBranch
+          })
+        }
+      />
     </div>
+  )
+}
+
+function BaseBranchSelect({
+  repoId,
+  value,
+  defaultBase,
+  onChange
+}: {
+  repoId: number
+  value: string
+  defaultBase: string
+  onChange: (branch: string) => void
+}) {
+  const [branches, setBranches] = useState<string[] | null>(null)
+  const [loading, setLoading] = useState(false)
+
+  useEffect(() => {
+    let cancelled = false
+    setLoading(true)
+    window.api.features
+      .listRepoBranches(repoId)
+      .then((b) => {
+        if (!cancelled) setBranches(b)
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [repoId])
+
+  const options = branches?.includes(value) ? branches : [value, ...(branches ?? [])]
+
+  return (
+    <label className="block">
+      <div className="mb-1 text-[10px] uppercase tracking-wider text-muted">
+        Base branch
+      </div>
+      <select
+        className="w-full rounded-md bg-panel border border-border px-2.5 py-1.5 text-xs outline-none focus:border-accent"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+      >
+        {loading && !branches && <option value={value}>Loading branches...</option>}
+        {!loading && options.length === 0 && <option value={defaultBase}>{defaultBase}</option>}
+        {options.map((branch) => (
+          <option key={branch} value={branch}>
+            {branch}
+            {branch === defaultBase ? ' (current)' : ''}
+          </option>
+        ))}
+      </select>
+    </label>
   )
 }
 
