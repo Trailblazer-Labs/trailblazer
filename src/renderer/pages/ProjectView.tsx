@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Settings } from 'lucide-react'
-import { Button } from '../components/ui'
+import { Button, Pill } from '../components/ui'
 import { cn } from '../lib/cn'
 import { useApp } from '../stores/app'
 import NewIssueModal from '../components/NewIssueModal'
@@ -18,10 +18,18 @@ import type { Issue, Project, PullRequest, Repo } from '@shared/types'
 
 type IssueRow = Issue & { repo: Repo }
 type PRRow = PullRequest & { repo: Repo }
+type ProjectTab = 'issues' | 'features' | 'planning'
 
-export default function ProjectView({ projectId }: { projectId: number }) {
+export default function ProjectView({
+  projectId,
+  initialTab = 'features'
+}: {
+  projectId: number
+  initialTab?: ProjectTab
+}) {
   const setView = useApp((s) => s.setView)
   const runStatus = useApp((s) => s.run.status)
+  const activeIssueRun = useApp((s) => s.run)
   const runRepoOwner = useApp((s) => s.selectedRepos[0]?.owner) // simple v0 ref
   void runRepoOwner
 
@@ -36,6 +44,16 @@ export default function ProjectView({ projectId }: { projectId: number }) {
     queryFn: () => window.api.projects.list()
   })
   const project = allProjects.find((p) => p.id === projectId)
+  const { data: activePlanIds = [] } = useQuery<number[]>({
+    queryKey: ['active-plans', projectId],
+    queryFn: () => window.api.plans.listActive(projectId),
+    refetchInterval: 1500
+  })
+  const { data: activeFeatureIds = [] } = useQuery<number[]>({
+    queryKey: ['active-features', projectId],
+    queryFn: () => window.api.features.listActive(projectId),
+    refetchInterval: 1500
+  })
 
   const repoKey = repos.map((r) => r.id).join(',')
 
@@ -104,7 +122,7 @@ export default function ProjectView({ projectId }: { projectId: number }) {
   const [showNewIssue, setShowNewIssue] = useState(false)
   const [showProjectSettings, setShowProjectSettings] = useState(false)
   const [showRun, setShowRun] = useState(false)
-  const [tab, setTab] = useState<'issues' | 'features' | 'planning'>('features')
+  const [tab, setTab] = useState<ProjectTab>(initialTab)
   const [repoFilter, setRepoFilter] = useState<number | null>(null) // null = All
   const [prFilters, setPrFilters] = useState({
     open: true,
@@ -153,6 +171,10 @@ export default function ProjectView({ projectId }: { projectId: number }) {
     void qc.invalidateQueries({ queryKey: ['pulls', projectId] })
   }
 
+  const issueRunVisible =
+    !!activeIssueRun.runId &&
+    ['pending', 'running', 'awaiting-approval'].includes(activeIssueRun.status)
+
   async function resolveIssue(target: IssueRow | null = selectedIssue) {
     if (!target) return
     const r = target.repo
@@ -172,6 +194,10 @@ export default function ProjectView({ projectId }: { projectId: number }) {
 
   const runActive = !['idle', 'pushed', 'failed', 'cancelled'].includes(runStatus)
 
+  useEffect(() => {
+    setTab(initialTab)
+  }, [initialTab, projectId])
+
   return (
     <div className="h-full flex flex-col overflow-hidden">
       <header className="h-14 border-b border-border flex items-center justify-between px-5 shrink-0 gap-4">
@@ -186,19 +212,36 @@ export default function ProjectView({ projectId }: { projectId: number }) {
           <h1 className="font-brand text-base truncate">{project?.name ?? '…'}</h1>
         </div>
         <div className="flex items-center justify-center flex-1">
-          <div className="inline-flex p-1 rounded-lg border border-border bg-bg">
-            <TabPill active={tab === 'features'} onClick={() => setTab('features')}>
+          <div className="inline-flex items-center gap-1 rounded-full border border-border/60 bg-panel/40 p-1 shadow-inner shadow-black/10">
+            <TabPill
+              active={tab === 'features'}
+              working={activeFeatureIds.length > 0}
+              onClick={() => setTab('features')}
+            >
               Features
             </TabPill>
-            <TabPill active={tab === 'planning'} onClick={() => setTab('planning')}>
+            <TabPill
+              active={tab === 'planning'}
+              working={activePlanIds.length > 0}
+              onClick={() => setTab('planning')}
+            >
               Planning
             </TabPill>
-            <TabPill active={tab === 'issues'} onClick={() => setTab('issues')}>
+            <TabPill active={tab === 'issues'} working={issueRunVisible} onClick={() => setTab('issues')}>
               Issues
             </TabPill>
           </div>
         </div>
         <div className="flex items-center gap-2">
+          {issueRunVisible && activeIssueRun.repoOwner && activeIssueRun.repoName && (
+            <button
+              onClick={() => setShowRun(true)}
+              className="no-drag"
+              title="Open active issue run"
+            >
+              <Pill tone="running">Working</Pill>
+            </button>
+          )}
           <button
             onClick={() => setShowProjectSettings(true)}
             title="Project settings"
@@ -212,7 +255,6 @@ export default function ProjectView({ projectId }: { projectId: number }) {
       </header>
 
       <div className="flex-1 flex flex-col overflow-hidden">
-
         {tab === 'features' && (
           <div className="flex-1 min-h-0 overflow-hidden">
             <FeaturesView projectId={projectId} repos={repos} />
@@ -468,12 +510,12 @@ export default function ProjectView({ projectId }: { projectId: number }) {
           onClose={() => setShowProjectSettings(false)}
         />
       )}
-      {showRun && selectedIssue && (
+      {showRun && (
         <RunDrawer
           onClose={() => setShowRun(false)}
-          repoOwner={selectedIssue.repo.owner}
-          repoName={selectedIssue.repo.name}
-          issueNumber={selectedIssue.number}
+          repoOwner={selectedIssue?.repo.owner ?? activeIssueRun.repoOwner ?? ''}
+          repoName={selectedIssue?.repo.name ?? activeIssueRun.repoName ?? ''}
+          issueNumber={selectedIssue?.number ?? activeIssueRun.issueNumber ?? 0}
           onPushed={() => {
             refresh()
           }}
@@ -597,22 +639,27 @@ function RepoAvatar({ owner }: { owner: string }) {
 function TabPill({
   active,
   onClick,
+  working,
   children
 }: {
   active: boolean
   onClick: () => void
+  working?: boolean
   children: React.ReactNode
 }) {
   return (
     <button
       onClick={onClick}
       className={cn(
-        'px-6 py-2 text-sm font-medium rounded-md transition-colors min-w-[120px]',
+        'relative h-8 px-5 text-sm font-medium rounded-full transition-all min-w-[112px]',
         active
-          ? 'bg-panel text-text border border-border shadow-sm'
-          : 'text-muted hover:text-text'
+          ? 'bg-[#24201d] text-text shadow-sm shadow-black/20 ring-1 ring-white/5'
+          : 'text-muted hover:text-text hover:bg-white/[0.03]'
       )}
     >
+      {working && (
+        <span className="mr-2 inline-block h-1.5 w-1.5 rounded-full bg-amber-300 tb-pulse align-middle" />
+      )}
       {children}
     </button>
   )

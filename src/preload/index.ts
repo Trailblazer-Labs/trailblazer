@@ -3,6 +3,10 @@ import { IPC } from '../shared/ipc'
 import type { ModelUseCase } from '../shared/models'
 import type {
   AppConfig,
+  ActiveIssueRun,
+  DevProfile,
+  DevProfileInput,
+  DevSetupState,
   Engine,
   EngineDetection,
   ExpandEvent,
@@ -11,6 +15,7 @@ import type {
   FeatureRepo,
   FeatureCommitResult,
   FeatureRepoChanges,
+  FeatureDevCommandEvent,
   FeatureRunEvent,
   FeatureSession,
   GhAuthEvent,
@@ -150,7 +155,8 @@ const api = {
   projects: {
     list: (): Promise<Project[]> => ipcRenderer.invoke(IPC.projectsList),
     get: (id: number): Promise<Project | null> => ipcRenderer.invoke(IPC.projectsGet, id),
-    create: (name: string): Promise<Project> => ipcRenderer.invoke(IPC.projectsCreate, name),
+    create: (name: string, assistantEngine?: Engine | null): Promise<Project> =>
+      ipcRenderer.invoke(IPC.projectsCreate, { name, assistantEngine }),
     updateSettings: (
       id: number,
       patch: {
@@ -180,6 +186,8 @@ const api = {
     update: (planId: number, patch: { title?: string; content?: string }): Promise<Plan> =>
       ipcRenderer.invoke(IPC.plansUpdate, planId, patch),
     delete: (planId: number): Promise<{ ok: true }> => ipcRenderer.invoke(IPC.plansDelete, planId),
+    listActive: (projectId?: number): Promise<number[]> =>
+      ipcRenderer.invoke(IPC.plansListActive, projectId),
     createFeature: (args: {
       planId: number
       name: string
@@ -208,6 +216,8 @@ const api = {
     list: (projectId: number): Promise<Feature[]> => ipcRenderer.invoke(IPC.featuresList, projectId),
     get: (featureId: number): Promise<Feature | null> =>
       ipcRenderer.invoke(IPC.featuresGet, featureId),
+    listActive: (projectId?: number): Promise<number[]> =>
+      ipcRenderer.invoke(IPC.featuresListActive, projectId),
     listRepos: (featureId: number): Promise<FeatureRepo[]> =>
       ipcRenderer.invoke(IPC.featuresListRepos, featureId),
     listRepoBranches: (repoId: number): Promise<string[]> =>
@@ -216,6 +226,7 @@ const api = {
       projectId: number
       name: string
       repoIds: number[]
+      baseBranches?: Record<number, string>
     }): Promise<{ feature: Feature; featureRepos: FeatureRepo[] }> =>
       ipcRenderer.invoke(IPC.featuresCreate, args),
     import: (args: {
@@ -268,6 +279,33 @@ const api = {
       ipcRenderer.invoke(IPC.featuresCommitPublish, args),
     publish: (featureId: number): Promise<FeatureCommitResult[]> =>
       ipcRenderer.invoke(IPC.featuresPublish, featureId),
+    pull: (featureId: number): Promise<FeatureCommitResult[]> =>
+      ipcRenderer.invoke(IPC.featuresPull, featureId),
+    runDevCommand: (args: {
+      featureId: number
+      repoId: number
+      command: string
+      cwd?: string
+    }): Promise<{ commandId: string }> => ipcRenderer.invoke(IPC.featuresDevRun, args),
+    runDevProfile: (args: {
+      featureId: number
+      profileId: number
+    }): Promise<{ commandId: string }> => ipcRenderer.invoke(IPC.featuresDevRunProfile, args),
+    runDevSetup: (args: {
+      featureId: number
+      profileId: number
+    }): Promise<{ ok: true }> => ipcRenderer.invoke(IPC.featuresDevRunSetup, args),
+    getDevSetupState: (args: {
+      featureId: number
+      profileId: number
+    }): Promise<DevSetupState> => ipcRenderer.invoke(IPC.featuresDevSetupState, args),
+    stopDevCommand: (featureId: number): Promise<{ ok: true }> =>
+      ipcRenderer.invoke(IPC.featuresDevStop, featureId),
+    onDevEvent: (cb: (evt: FeatureDevCommandEvent) => void) => {
+      const listener = (_e: IpcRendererEvent, evt: FeatureDevCommandEvent) => cb(evt)
+      ipcRenderer.on(IPC.featuresDevEvent, listener)
+      return () => { ipcRenderer.off(IPC.featuresDevEvent, listener) }
+    },
     onEvent: (cb: (evt: FeatureRunEvent) => void) => {
       const listener = (_e: IpcRendererEvent, evt: FeatureRunEvent) => cb(evt)
       ipcRenderer.on(IPC.featuresEvent, listener)
@@ -277,6 +315,12 @@ const api = {
   repos: {
     setWorkingBranch: (repoId: number, branch: string | null): Promise<{ ok: true }> =>
       ipcRenderer.invoke(IPC.reposSetWorkingBranch, repoId, branch)
+  },
+  devProfiles: {
+    list: (projectId: number): Promise<DevProfile[]> =>
+      ipcRenderer.invoke(IPC.devProfilesList, projectId),
+    save: (projectId: number, profiles: DevProfileInput[]): Promise<DevProfile[]> =>
+      ipcRenderer.invoke(IPC.devProfilesSave, projectId, profiles)
   },
   shell: {
     openExternal: (url: string): Promise<void> =>
@@ -295,6 +339,7 @@ const api = {
     cancel: (runId: string) => ipcRenderer.invoke(IPC.runsCancel, runId),
     approvePush: (runId: string): Promise<{ prNumber: number; url: string }> =>
       ipcRenderer.invoke(IPC.runsApprovePush, runId),
+    getActive: (): Promise<ActiveIssueRun | null> => ipcRenderer.invoke(IPC.runsGetActive),
     onEvent: (cb: (evt: RunEvent) => void) => {
       const listener = (_e: IpcRendererEvent, evt: RunEvent) => cb(evt)
       ipcRenderer.on(IPC.runEvent, listener)

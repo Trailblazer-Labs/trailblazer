@@ -5,7 +5,6 @@ import {
   Eye,
   FileText,
   GitBranch,
-  Lightbulb,
   Paperclip,
   Plus,
   Send,
@@ -16,7 +15,8 @@ import {
 } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { Button, Input } from '../components/ui'
+import { Button, Card, Input } from '../components/ui'
+import { Modal } from '../components/NewIssueModal'
 import ActivityList, { applyActivity } from '../components/ActivityList'
 import { cn } from '../lib/cn'
 import { filesFromClipboard, filesFromDrop, filesToPromptAttachments } from '../lib/chatAttachments'
@@ -54,6 +54,10 @@ export default function PlanningView({ projectId, repos }: { projectId: number; 
     }
     return CHAT_DEFAULT_WIDTH
   })
+  const [agentShelved, setAgentShelved] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false
+    return window.localStorage.getItem('planning.agentShelved') === 'true'
+  })
   const [activePlanId, setActivePlanId] = useState<number | null>(null)
   const [title, setTitle] = useState('')
   const [content, setContent] = useState('')
@@ -65,6 +69,8 @@ export default function PlanningView({ projectId, repos }: { projectId: number; 
   const [assistantError, setAssistantError] = useState<string | null>(null)
   const [liveActivities, setLiveActivities] = useState<AgentActivity[]>([])
   const [converting, setConverting] = useState(false)
+  const [featureNameDraft, setFeatureNameDraft] = useState('')
+  const [showFeatureNameDialog, setShowFeatureNameDialog] = useState(false)
   const [attachments, setAttachments] = useState<PlanPromptAttachment[]>([])
   const [queuedAssistantTurn, setQueuedAssistantTurn] = useState<{
     prompt: string
@@ -75,11 +81,18 @@ export default function PlanningView({ projectId, repos }: { projectId: number; 
     queryKey: ['plans', projectId],
     queryFn: () => window.api.plans.list(projectId)
   })
+  const { data: activePlanIds = [] } = useQuery<number[]>({
+    queryKey: ['active-plans', projectId],
+    queryFn: () => window.api.plans.listActive(projectId),
+    refetchInterval: 1500
+  })
 
   const activePlan = useMemo(
     () => plans.find((plan) => plan.id === activePlanId) ?? null,
     [activePlanId, plans]
   )
+  const activePlanRunning = activePlanId !== null && activePlanIds.includes(activePlanId)
+  const assistantBusy = assistantRunning || activePlanRunning
 
   const { data: messages = [] } = useQuery<PlanMessage[]>({
     queryKey: ['plan-messages', activePlanId],
@@ -110,7 +123,10 @@ export default function PlanningView({ projectId, repos }: { projectId: number; 
 
   useEffect(() => {
     if (!activePlan) return
-    if (title === activePlan.title && content === activePlan.content) return
+    if (title === activePlan.title && content === activePlan.content) {
+      setSaveState('saved')
+      return
+    }
 
     setSaveState('saving')
     const timer = window.setTimeout(async () => {
@@ -149,7 +165,7 @@ export default function PlanningView({ projectId, repos }: { projectId: number; 
   async function sendAssistant(text = assistantInput, files = attachments) {
     const prompt = text.trim() || (files.length > 0 ? 'Review the attached files.' : '')
     if (!prompt || !activePlan) return
-    if (assistantRunning) {
+    if (assistantBusy) {
       setQueuedAssistantTurn({ prompt, attachments: files })
       setAssistantInput('')
       setAttachments([])
@@ -185,26 +201,36 @@ export default function PlanningView({ projectId, repos }: { projectId: number; 
   }
 
   useEffect(() => {
-    if (assistantRunning || !queuedAssistantTurn) return
+    if (assistantBusy || !queuedAssistantTurn) return
     const next = queuedAssistantTurn
     setQueuedAssistantTurn(null)
     void sendAssistant(next.prompt, next.attachments)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [assistantRunning, queuedAssistantTurn])
+  }, [assistantBusy, queuedAssistantTurn])
 
   async function cancelAssistant() {
-    if (!activePlan || !assistantRunning) return
+    if (!activePlan || !assistantBusy) return
     await window.api.plans.cancelPrompt(activePlan.id)
   }
 
   async function turnIntoFeature() {
     if (!activePlan || converting) return
-    let featureName = title.trim()
-    if (/^Plan \d+$/i.test(featureName) || featureName === 'Untitled plan') {
-      const named = window.prompt('Name this feature', '')
-      if (named === null) return
-      featureName = named.trim()
+    if (activePlan.featureId) {
+      setView({ kind: 'feature', projectId, featureId: activePlan.featureId })
+      return
     }
+    const featureName = title.trim()
+    if (/^Plan \d+$/i.test(featureName) || featureName === 'Untitled plan') {
+      setFeatureNameDraft(suggestFeatureName(content))
+      setShowFeatureNameDialog(true)
+      return
+    }
+    await createFeatureFromCurrentPlan(featureName)
+  }
+
+  async function createFeatureFromCurrentPlan(featureName: string) {
+    if (!activePlan || converting) return
+    featureName = featureName.trim()
     if (!featureName) return
     if (repos.length === 0) {
       setAssistantError('Add at least one repo to this project before creating a feature.')
@@ -230,6 +256,7 @@ export default function PlanningView({ projectId, repos }: { projectId: number; 
       })
       void qc.invalidateQueries({ queryKey: ['plans', projectId] })
       void qc.invalidateQueries({ queryKey: ['features', projectId] })
+      setShowFeatureNameDialog(false)
       setView({
         kind: 'feature',
         projectId,
@@ -248,6 +275,11 @@ export default function PlanningView({ projectId, repos }: { projectId: number; 
     if (typeof window === 'undefined') return
     window.localStorage.setItem('planning.chatWidth', String(chatWidth))
   }, [chatWidth])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    window.localStorage.setItem('planning.agentShelved', String(agentShelved))
+  }, [agentShelved])
 
   function startResizingChat(e: React.PointerEvent<HTMLDivElement>) {
     e.preventDefault()
@@ -315,8 +347,12 @@ export default function PlanningView({ projectId, repos }: { projectId: number; 
 
   return (
     <div
-      className="h-full min-h-0 grid overflow-hidden bg-bg"
-      style={{ gridTemplateColumns: `260px minmax(0, 1fr) 6px ${chatWidth}px` }}
+      className="relative h-full min-h-0 grid overflow-hidden bg-bg"
+      style={{
+        gridTemplateColumns: agentShelved
+          ? '260px minmax(0, 1fr)'
+          : `260px minmax(0, 1fr) 6px ${chatWidth}px`
+      }}
     >
       <aside className="border-r border-border bg-[#101010] flex flex-col min-h-0">
         <header className="h-14 px-4 border-b border-border flex items-center justify-between shrink-0">
@@ -367,7 +403,14 @@ export default function PlanningView({ projectId, repos }: { projectId: number; 
                       <div className="min-w-0 flex-1">
                         <div className="text-sm truncate">{plan.title}</div>
                         <div className="text-[10px] text-muted mt-1">
-                          Edited {formatRelativeDate(plan.updatedAt)}
+                          {activePlanIds.includes(plan.id) ? (
+                            <span className="inline-flex items-center gap-1 text-amber-300">
+                              <span className="tb-pulse h-1.5 w-1.5 rounded-full bg-amber-300" />
+                              Working
+                            </span>
+                          ) : (
+                            <>Edited {formatRelativeDate(plan.updatedAt)}</>
+                          )}
                         </div>
                       </div>
                     </div>
@@ -412,14 +455,24 @@ export default function PlanningView({ projectId, repos }: { projectId: number; 
                   className="h-8 whitespace-nowrap"
                   onClick={turnIntoFeature}
                   disabled={!activePlan || converting}
-                  title={converting ? 'Creating feature...' : 'Turn plan into feature'}
+                  title={
+                    activePlan?.featureId
+                      ? 'Go to linked feature'
+                      : converting
+                        ? 'Creating feature...'
+                        : 'Turn plan into feature'
+                  }
                 >
                   <GitBranch size={14} />
                   <span className="hidden xl:inline">
-                    {converting ? 'Creating...' : 'Turn plan into feature'}
+                    {activePlan?.featureId
+                      ? 'Go to feature'
+                      : converting
+                        ? 'Creating...'
+                        : 'Turn plan into feature'}
                   </span>
                   <span className="xl:hidden">
-                    {converting ? 'Creating' : 'To feature'}
+                    {activePlan?.featureId ? 'Feature' : converting ? 'Creating' : 'To feature'}
                   </span>
                 </Button>
                 <button
@@ -473,36 +526,43 @@ export default function PlanningView({ projectId, repos }: { projectId: number; 
         )}
       </main>
 
-      <div
-        role="separator"
-        aria-orientation="vertical"
-        aria-label="Resize chat panel"
-        onPointerDown={startResizingChat}
-        onDoubleClick={() => setChatWidth(CHAT_DEFAULT_WIDTH)}
-        className="no-drag relative h-full cursor-col-resize group"
-      >
-        <div className="absolute inset-y-0 left-1/2 -translate-x-1/2 w-px bg-border" />
-        <div className="absolute inset-y-0 left-1/2 -translate-x-1/2 w-1.5 bg-transparent group-hover:bg-accent/30 transition-colors" />
-      </div>
-      <aside className="border-l border-border bg-[#111111] flex flex-col min-h-0 min-w-0">
-        <header className="h-14 px-4 border-b border-border flex items-center gap-2 shrink-0">
-          <div className="w-8 h-8 rounded-md border border-border bg-[#1f1614] flex items-center justify-center text-accent">
-            <Lightbulb size={15} />
+      {!agentShelved && (
+        <>
+          <div
+            role="separator"
+            aria-orientation="vertical"
+            aria-label="Resize chat panel"
+            onPointerDown={startResizingChat}
+            onDoubleClick={() => setChatWidth(CHAT_DEFAULT_WIDTH)}
+            className="no-drag relative h-full cursor-col-resize group"
+          >
+            <div className="absolute inset-y-0 left-1/2 -translate-x-1/2 w-px bg-border" />
+            <div className="absolute inset-y-0 left-1/2 -translate-x-1/2 w-1.5 bg-transparent group-hover:bg-accent/30 transition-colors" />
           </div>
-          <div>
-            <h2 className="text-sm font-medium">Planning agent</h2>
-            <div className="text-[10px] uppercase tracking-wider text-muted">
-              Draft support
-            </div>
-          </div>
-        </header>
+          <aside className="border-l border-border bg-[#111111] flex flex-col min-h-0 min-w-0">
+            <header className="h-14 px-4 border-b border-border flex items-center justify-between gap-3 shrink-0">
+              <div className="min-w-0">
+                <h2 className="text-sm font-medium">Planning agent</h2>
+                <div className="text-[10px] uppercase tracking-wider text-muted">
+                  {assistantBusy ? 'Working' : 'Draft support'}
+                </div>
+              </div>
+              <button
+                onClick={() => setAgentShelved(true)}
+                title="Shelve planning agent"
+                aria-label="Shelve planning agent"
+                className="no-drag w-8 h-8 rounded-md border border-border bg-panel text-muted hover:text-text hover:bg-[#1d1d1d] flex items-center justify-center transition-colors shrink-0"
+              >
+                <X size={14} />
+              </button>
+            </header>
         <div className="p-3 border-b border-border">
           <div className="grid grid-cols-2 gap-2">
             {promptChips.map((chip) => (
               <button
                 key={chip}
                 onClick={() => sendAssistant(chip)}
-                disabled={!activePlan || assistantRunning}
+                disabled={!activePlan || assistantBusy}
                 className="no-drag rounded-md border border-border bg-panel px-2.5 py-2 text-xs text-muted hover:text-text hover:bg-[#1d1d1d] transition-colors"
               >
                 {chip}
@@ -519,7 +579,7 @@ export default function PlanningView({ projectId, repos }: { projectId: number; 
           </Button>
         </div>
         <div className="flex-1 min-h-0 overflow-y-auto p-3 space-y-3">
-          {messages.length === 0 && !assistantRunning && (
+          {messages.length === 0 && !assistantBusy && (
             <div className="rounded-lg border border-border bg-panel px-3 py-2.5 text-xs leading-5 text-muted">
               Ask for scope, milestones, risks, acceptance criteria, or repo-specific planning
               guidance. The agent can inspect all repos in this project.
@@ -528,12 +588,12 @@ export default function PlanningView({ projectId, repos }: { projectId: number; 
           {messages.map((message) => (
             <PlanChatMessage key={message.id} message={message} />
           ))}
-          {(assistantRunning || liveActivities.length > 0) && (
+          {(assistantBusy || liveActivities.length > 0) && (
             <ActivityList
               items={liveActivities}
               emptyLabel="Reading project context..."
               engineLabel={assistantEngine ?? 'Agent'}
-              busy={assistantRunning}
+              busy={assistantBusy}
             />
           )}
           {assistantError && (
@@ -618,14 +678,14 @@ export default function PlanningView({ projectId, repos }: { projectId: number; 
               onClick={() => {
                 void sendAssistant()
               }}
-              title={assistantRunning ? 'Queue message' : 'Send'}
-              aria-label={assistantRunning ? 'Queue message' : 'Send'}
+              title={assistantBusy ? 'Queue message' : 'Send'}
+              aria-label={assistantBusy ? 'Queue message' : 'Send'}
               disabled={!activePlan || (!assistantInput.trim() && attachments.length === 0)}
               className="no-drag w-9 h-9 rounded-md border border-accent bg-accent text-black hover:brightness-110 flex items-center justify-center transition-colors shrink-0"
             >
               <Send size={14} />
             </button>
-            {assistantRunning && (
+            {assistantBusy && (
               <button
                 onClick={() => void cancelAssistant()}
                 title="Stop"
@@ -638,7 +698,56 @@ export default function PlanningView({ projectId, repos }: { projectId: number; 
             )}
           </div>
         </footer>
-      </aside>
+          </aside>
+        </>
+      )}
+      {agentShelved && (
+        <button
+          onClick={() => setAgentShelved(false)}
+          className="no-drag absolute right-4 bottom-4 z-10 inline-flex items-center gap-2 rounded-full border border-border bg-[#171717] px-3 py-2 text-xs text-muted shadow-lg hover:text-text hover:bg-[#1d1d1d] transition-colors"
+          title="Show planning agent"
+        >
+          {assistantBusy && <span className="tb-pulse h-1.5 w-1.5 rounded-full bg-amber-300" />}
+          <span>Planning agent</span>
+          {assistantBusy && <span className="text-amber-300">Working</span>}
+        </button>
+      )}
+      {showFeatureNameDialog && (
+        <Modal onClose={() => !converting && setShowFeatureNameDialog(false)}>
+          <Card className="w-[420px] p-4">
+            <h3 className="text-sm font-medium mb-1">Name this feature</h3>
+            <p className="text-xs text-muted mb-3">
+              This creates feature branches for the selected project repos.
+            </p>
+            <Input
+              autoFocus
+              value={featureNameDraft}
+              onChange={(e) => setFeatureNameDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') void createFeatureFromCurrentPlan(featureNameDraft)
+                if (e.key === 'Escape' && !converting) setShowFeatureNameDialog(false)
+              }}
+              placeholder="Feature name"
+              disabled={converting}
+            />
+            {assistantError && (
+              <div className="mt-2 text-xs text-red-300">{assistantError}</div>
+            )}
+            <div className="mt-4 flex justify-end gap-2">
+              <Button onClick={() => setShowFeatureNameDialog(false)} disabled={converting}>
+                Cancel
+              </Button>
+              <Button
+                variant="primary"
+                disabled={converting || !featureNameDraft.trim()}
+                onClick={() => void createFeatureFromCurrentPlan(featureNameDraft)}
+              >
+                {converting ? 'Creating...' : 'Create feature'}
+              </Button>
+            </div>
+          </Card>
+        </Modal>
+      )}
     </div>
   )
 }
@@ -711,6 +820,14 @@ function planningTemplate(title: string) {
 
 ### Next decisions
 - `
+}
+
+function suggestFeatureName(content: string): string {
+  const heading = content
+    .split('\n')
+    .map((line) => line.match(/^#{1,3}\s+(.+)$/)?.[1]?.trim())
+    .find((line) => line && !/^Plan \d+$/i.test(line) && line !== 'Untitled plan')
+  return heading ?? ''
 }
 
 function formatRelativeDate(value: string) {

@@ -110,6 +110,37 @@ export async function pushBranch(worktreePath: string, branch: string): Promise<
   await git.push(['-u', 'origin', branch])
 }
 
+export async function pullBranch(worktreePath: string, branch: string): Promise<'pulled' | 'clean'> {
+  const git = simpleGit(worktreePath)
+  const status = await git.status()
+  if (!status.isClean()) {
+    throw new Error('Commit or stash local changes before pulling.')
+  }
+
+  let hasRemoteBranch = false
+  try {
+    await git.fetch('origin', branch)
+    await git.raw(['rev-parse', '--verify', `origin/${branch}`])
+    hasRemoteBranch = true
+  } catch {
+    // Feature branch has not been published yet.
+  }
+  if (!hasRemoteBranch) return 'clean'
+
+  const before = (await git.revparse(['HEAD'])).trim()
+  try {
+    await git.raw(['pull', '--rebase', 'origin', branch])
+  } catch (e) {
+    throw new Error(
+      `Pull failed; resolve conflicts in ${worktreePath}, then retry. ${
+        e instanceof Error ? e.message : String(e)
+      }`
+    )
+  }
+  const after = (await git.revparse(['HEAD'])).trim()
+  return before === after ? 'clean' : 'pulled'
+}
+
 /**
  * Rewrite the `origin` remote URL with the current token. Cloned repos store the
  * token in their .git/config; without this, every push reuses the token that was

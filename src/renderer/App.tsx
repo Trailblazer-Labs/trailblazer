@@ -12,7 +12,7 @@ import type { ReleaseGateStatus } from '@shared/types'
 const IS_MAC = navigator.platform.toLowerCase().includes('mac')
 
 export default function App() {
-  const { view, setView, applyRunEvent } = useApp()
+  const { view, setView, applyRunEvent, hydrateActiveRun } = useApp()
   const [splashDone, setSplashDone] = useState(false)
   const [releaseGate, setReleaseGate] = useState<ReleaseGateStatus | null>(null)
   const [checkingGate, setCheckingGate] = useState(true)
@@ -33,8 +33,15 @@ export default function App() {
       setCheckingGate(false)
     })
     const unsub = window.api.runs.onEvent(applyRunEvent)
-    return () => unsub()
-  }, [setView, applyRunEvent])
+    const poll = window.setInterval(() => {
+      window.api.runs.getActive().then(hydrateActiveRun).catch(() => {})
+    }, 1500)
+    window.api.runs.getActive().then(hydrateActiveRun).catch(() => {})
+    return () => {
+      unsub()
+      window.clearInterval(poll)
+    }
+  }, [setView, applyRunEvent, hydrateActiveRun])
 
   async function refreshReleaseGate() {
     setCheckingGate(true)
@@ -72,7 +79,7 @@ export default function App() {
             )}
             {view.kind === 'onboarding' && <Onboarding />}
             {view.kind === 'projects' && <Projects />}
-            {view.kind === 'project' && <ProjectView projectId={view.projectId} />}
+            {view.kind === 'project' && <ProjectView projectId={view.projectId} initialTab={view.tab} />}
             {view.kind === 'feature' && (
               <FeatureChatView
                 projectId={view.projectId}

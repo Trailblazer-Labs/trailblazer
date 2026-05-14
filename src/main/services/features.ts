@@ -4,6 +4,7 @@ import { app } from 'electron'
 import simpleGit from 'simple-git'
 import { getDb } from './db'
 import { ensureRepoCloned } from './git'
+import * as gh from './github'
 import type { Engine, Feature, FeatureRepo, FeatureSession } from '@shared/types'
 
 export function featuresRoot(): string {
@@ -45,6 +46,55 @@ export function listFeatures(projectId: number): Feature[] {
     workspacePath: r.workspace_path,
     createdAt: r.created_at
   }))
+}
+
+export async function listFeaturesWithPrSync(projectId: number): Promise<Feature[]> {
+  const summaries = await syncMergedFeatureStatuses(projectId)
+  return listFeatures(projectId).map((feature) => ({
+    ...feature,
+    ...summaries.get(feature.id)
+  }))
+}
+
+type FeatureCompletionSummary = {
+  repoCount: number
+  prRepoCount: number
+  mergedRepoCount: number
+}
+
+async function syncMergedFeatureStatuses(
+  projectId: number
+): Promise<Map<number, FeatureCompletionSummary>> {
+  const rows = getDb()
+    .prepare(`SELECT id FROM features WHERE project_id = ? AND status != 'archived'`)
+    .all(projectId) as { id: number }[]
+  const summaries = new Map<number, FeatureCompletionSummary>()
+
+  for (const feature of rows) {
+    const repos = listFeatureRepos(feature.id)
+    let prRepoCount = 0
+    let mergedRepoCount = 0
+
+    for (const repo of repos) {
+      if (!repo.prNumber) continue
+      prRepoCount++
+      try {
+        const detail = await gh.getPullDetail(repo.repoOwner, repo.repoName, repo.prNumber)
+        if (detail.state === 'merged') mergedRepoCount++
+      } catch {
+        // Leave this repo unmerged if GitHub cannot be checked right now.
+      }
+    }
+
+    const summary = { repoCount: repos.length, prRepoCount, mergedRepoCount }
+    summaries.set(feature.id, summary)
+    const complete = repos.length > 0 && mergedRepoCount === repos.length
+    getDb()
+      .prepare(`UPDATE features SET status = ? WHERE id = ?`)
+      .run(complete ? 'merged' : 'active', feature.id)
+  }
+
+  return summaries
 }
 
 export function getFeature(featureId: number): Feature | null {
@@ -119,6 +169,7 @@ export async function createFeature(opts: {
   projectId: number
   name: string
   repoIds: number[]
+  baseBranches?: Record<number, string>
 }): Promise<{ feature: Feature; featureRepos: FeatureRepo[] }> {
   const slug = slugify(opts.name)
   if (!slug) throw new Error('Feature name cannot be empty')
@@ -156,7 +207,8 @@ export async function createFeature(opts: {
 
   for (const repo of repos) {
     const repoPath = await ensureRepoCloned(repo.owner, repo.name)
-    const baseBranch = repo.working_branch
+    const requestedBase = opts.baseBranches?.[repo.id]?.trim()
+    const baseBranch = requestedBase || repo.working_branch
     const worktreePath = path.join(workspacePath, repo.name)
     await createOrAttachWorktree(repoPath, worktreePath, branch, baseBranch)
     db.prepare(

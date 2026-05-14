@@ -8,6 +8,7 @@ import { filesFromClipboard, filesFromDrop, filesToPromptAttachments } from '../
 import PRResultsModal from '../components/PRResultsModal'
 import FeatureSwitcher, { useFeatureSwitcherCollapsed } from '../components/FeatureSwitcher'
 import FeatureChangesPanel from '../components/FeatureChangesPanel'
+import { cn } from '../lib/cn'
 import { Paperclip, X } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -104,6 +105,21 @@ export default function FeatureChatView({
     queryKey: ['repos', projectId],
     queryFn: () => window.api.projects.listRepos(projectId)
   })
+  const { data: activeFeatureIds = [] } = useQuery<number[]>({
+    queryKey: ['active-features', projectId],
+    queryFn: () => window.api.features.listActive(projectId),
+    refetchInterval: 1500
+  })
+  const { data: activePlanIds = [] } = useQuery<number[]>({
+    queryKey: ['active-plans', projectId],
+    queryFn: () => window.api.plans.listActive(projectId),
+    refetchInterval: 1500
+  })
+  const agentRunning = running || activeFeatureIds.includes(featureId)
+  const activeIssueRunId = useApp((s) => s.run.runId)
+  const activeIssueRunStatus = useApp((s) => s.run.status)
+  const issueRunVisible =
+    !!activeIssueRunId && ['pending', 'running', 'awaiting-approval'].includes(activeIssueRunStatus)
 
   const threadRef = useRef<HTMLDivElement>(null)
   const stickRef = useRef(true)
@@ -191,7 +207,7 @@ export default function FeatureChatView({
   async function send(text = draft, files = attachments) {
     const prompt = text.trim() || (files.length > 0 ? 'Review the attached files.' : '')
     if (!prompt) return
-    if (running) {
+    if (agentRunning) {
       setQueuedTurn({ prompt, attachments: files })
       setDraft('')
       setAttachments([])
@@ -215,12 +231,12 @@ export default function FeatureChatView({
   }
 
   useEffect(() => {
-    if (running || !queuedTurn) return
+    if (agentRunning || !queuedTurn) return
     const next = queuedTurn
     setQueuedTurn(null)
     void send(next.prompt, next.attachments)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [running, queuedTurn])
+  }, [agentRunning, queuedTurn])
 
   async function cancel() {
     await window.api.features.cancelTurn(featureId)
@@ -270,9 +286,9 @@ export default function FeatureChatView({
 
       <div className="flex-1 flex flex-col overflow-hidden">
         <header className="h-14 border-b border-border flex items-center justify-between px-5 shrink-0 gap-4">
-          <div className="flex items-center gap-2 min-w-0">
+          <div className="flex flex-1 items-center gap-2 min-w-0">
             <button
-              onClick={() => setView({ kind: 'project', projectId })}
+              onClick={() => setView({ kind: 'project', projectId, tab: 'features' })}
               className="text-xs text-muted hover:text-text shrink-0"
             >
               ← {feature?.name ? 'Project' : 'Back'}
@@ -293,7 +309,17 @@ export default function FeatureChatView({
               </>
             )}
           </div>
-          <div className="flex items-center gap-2">
+          <div className="hidden md:flex flex-1 items-center justify-center">
+            <FeatureProjectTabs
+              planningWorking={activePlanIds.length > 0}
+              issuesWorking={issueRunVisible}
+              featuresWorking={activeFeatureIds.length > 0}
+              onFeatures={() => setView({ kind: 'project', projectId, tab: 'features' })}
+              onPlanning={() => setView({ kind: 'project', projectId, tab: 'planning' })}
+              onIssues={() => setView({ kind: 'project', projectId, tab: 'issues' })}
+            />
+          </div>
+          <div className="flex flex-1 items-center justify-end gap-2">
             <Button
               onClick={async () => {
                 const s = await window.api.features.createSession(featureId)
@@ -312,7 +338,7 @@ export default function FeatureChatView({
         <div className="flex-1 min-h-0 overflow-hidden flex">
        <div className="flex-1 min-w-0 flex flex-col">
         <div ref={threadRef} className="flex-1 overflow-auto px-8 py-6 space-y-5">
-          {messages.length === 0 && !running && (
+          {messages.length === 0 && !agentRunning && (
             <div className="max-w-2xl mx-auto text-center text-sm text-muted py-12">
               Start by describing what you want this feature to do. The agent will work across the
               feature branches in {featureRepos.map((r) => r.repoName).join(', ')}.
@@ -321,7 +347,7 @@ export default function FeatureChatView({
           {messages.map((m) => (
             <MessageBubble key={m.id} message={m} />
           ))}
-          {running && (
+          {agentRunning && (
             <div className="max-w-3xl mx-auto">
               <div className="mb-2 flex items-center gap-2 text-[10px] uppercase tracking-wider text-muted">
                 <span>Working…</span>
@@ -401,7 +427,7 @@ export default function FeatureChatView({
                   }
                 }}
                 placeholder={
-                  running
+                  agentRunning
                     ? 'Queue the next instruction while the agent works...  ⌘↵ to queue'
                     : 'Tell the agent what to build…  ⌘↵ to send'
                 }
@@ -414,7 +440,7 @@ export default function FeatureChatView({
                     <ChatModelPicker
                       engine={engine}
                       value={model}
-                      disabled={running}
+                      disabled={agentRunning}
                       onChange={(v) => setModelState(v)}
                     />
                   )}
@@ -434,11 +460,11 @@ export default function FeatureChatView({
                     <Paperclip size={13} />
                   </button>
                   <div className="text-[11px] text-muted truncate">
-                    {running ? 'Agent working — next message will queue.' : 'Sessions preserve prior turns.'}
+                    {agentRunning ? 'Agent working — next message will queue.' : 'Sessions preserve prior turns.'}
                   </div>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
-                  {running ? (
+                  {agentRunning ? (
                     <>
                       <Button disabled={!draft.trim() && attachments.length === 0} onClick={() => send()}>
                         Queue
@@ -537,6 +563,65 @@ function ChatModelPicker({
       )}
       {!isCustom && <option value="__custom__">Custom…</option>}
     </select>
+  )
+}
+
+function FeatureProjectTabs({
+  featuresWorking,
+  planningWorking,
+  issuesWorking,
+  onFeatures,
+  onPlanning,
+  onIssues
+}: {
+  featuresWorking: boolean
+  planningWorking: boolean
+  issuesWorking: boolean
+  onFeatures: () => void
+  onPlanning: () => void
+  onIssues: () => void
+}) {
+  return (
+    <div className="inline-flex items-center gap-1 rounded-full border border-border/60 bg-panel/40 p-1 shadow-inner shadow-black/10">
+      <FeatureProjectTab active working={featuresWorking} onClick={onFeatures}>
+        Features
+      </FeatureProjectTab>
+      <FeatureProjectTab working={planningWorking} onClick={onPlanning}>
+        Planning
+      </FeatureProjectTab>
+      <FeatureProjectTab working={issuesWorking} onClick={onIssues}>
+        Issues
+      </FeatureProjectTab>
+    </div>
+  )
+}
+
+function FeatureProjectTab({
+  active,
+  working,
+  onClick,
+  children
+}: {
+  active?: boolean
+  working?: boolean
+  onClick: () => void
+  children: React.ReactNode
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={cn(
+        'relative h-8 px-5 text-sm font-medium rounded-full transition-all min-w-[112px]',
+        active
+          ? 'bg-[#24201d] text-text shadow-sm shadow-black/20 ring-1 ring-white/5'
+          : 'text-muted hover:text-text hover:bg-white/[0.03]'
+      )}
+    >
+      {working && (
+        <span className="mr-2 inline-block h-1.5 w-1.5 rounded-full bg-amber-300 tb-pulse align-middle" />
+      )}
+      {children}
+    </button>
   )
 }
 

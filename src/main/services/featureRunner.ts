@@ -16,7 +16,7 @@ import {
   clearSessionCli,
   touchSession
 } from './features'
-import { pushBranch, refreshRemoteUrl } from './git'
+import { pullBranch, pushBranch, refreshRemoteUrl } from './git'
 import * as gh from './github'
 import { getAuthMode, ghGetToken } from './ghAuth'
 import { kvGetSecret } from './db'
@@ -119,6 +119,16 @@ export function cancelRun(featureId: number) {
   if (!ctx) return
   ctx.cancelled = true
   if (ctx.proc && !ctx.proc.killed) ctx.proc.kill('SIGTERM')
+}
+
+export function isFeatureInFlight(featureId: number): boolean {
+  return inFlight.has(featureId)
+}
+
+export function listActiveFeatureIds(projectId?: number): number[] {
+  const ids = [...inFlight.keys()]
+  if (typeof projectId !== 'number') return ids
+  return ids.filter((featureId) => getFeature(featureId)?.projectId === projectId)
 }
 
 export async function sendPrompt(args: {
@@ -457,7 +467,7 @@ function safeFileName(name: string): string {
 export interface FeatureCommitResult {
   repoId: number
   repoName: string
-  status: 'committed' | 'clean' | 'published' | 'failed'
+  status: 'committed' | 'clean' | 'published' | 'pulled' | 'failed'
   sha?: string
   filesCommitted?: number
   error?: string
@@ -566,6 +576,28 @@ export async function publishFeatureBranches(featureId: number): Promise<Feature
       }
       await pushBranch(r.worktreePath, r.branch)
       out.push({ repoId: r.repoId, repoName: r.repoName, status: 'published' })
+    } catch (e) {
+      out.push({
+        repoId: r.repoId,
+        repoName: r.repoName,
+        status: 'failed',
+        error: e instanceof Error ? e.message : String(e)
+      })
+    }
+  }
+  return out
+}
+
+export async function pullFeatureBranches(featureId: number): Promise<FeatureCommitResult[]> {
+  const feature = getFeature(featureId)
+  if (!feature) throw new Error('feature not found')
+  const repos = listFeatureRepos(featureId)
+  const out: FeatureCommitResult[] = []
+  for (const r of repos) {
+    try {
+      await refreshRemoteUrl(r.worktreePath, r.repoOwner, r.repoName)
+      const status = await pullBranch(r.worktreePath, r.branch)
+      out.push({ repoId: r.repoId, repoName: r.repoName, status })
     } catch (e) {
       out.push({
         repoId: r.repoId,

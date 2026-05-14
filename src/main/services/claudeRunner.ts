@@ -18,7 +18,7 @@ import { createParser } from './agentParser'
 import { getProjectIdForRepo, resolveProjectAgent } from './projectPrefs'
 import { extractAgentApiError } from './agentErrors'
 import { AGENT_INSTRUCTIONS_FILE_PROMPT } from './agentInstructions'
-import type { Run, RunEvent, DiffFile } from '@shared/types'
+import type { ActiveIssueRun, Run, RunEvent, DiffFile } from '@shared/types'
 
 export const runnerBus = new EventEmitter()
 
@@ -63,6 +63,18 @@ function setStatus(runId: string, status: Run['status']) {
 
 export function isRunInFlight(): boolean {
   return inFlight.size > 0
+}
+
+export function getActiveRun(): ActiveIssueRun | null {
+  const ctx = [...inFlight.values()][0]
+  if (!ctx) return null
+  return {
+    run: ctx.run,
+    repoOwner: ctx.repoOwner,
+    repoName: ctx.repoName,
+    issueNumber: ctx.issueNumber,
+    issueTitle: ctx.issueTitle
+  }
 }
 
 export async function startRun(opts: {

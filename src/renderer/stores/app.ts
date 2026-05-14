@@ -1,16 +1,20 @@
 import { create } from 'zustand'
 import { applyActivity } from '../components/ActivityList'
-import type { AgentActivity, Project, Repo, RunEvent, DiffFile } from '@shared/types'
+import type { ActiveIssueRun, AgentActivity, Project, Repo, RunEvent, DiffFile } from '@shared/types'
 
 type View =
   | { kind: 'loading' }
   | { kind: 'onboarding' }
   | { kind: 'projects' }
-  | { kind: 'project'; projectId: number }
+  | { kind: 'project'; projectId: number; tab?: 'features' | 'planning' | 'issues' }
   | { kind: 'feature'; projectId: number; featureId: number; sessionId?: number; initialDraft?: string }
 
 interface RunState {
   runId: string | null
+  repoOwner: string | null
+  repoName: string | null
+  issueNumber: number | null
+  issueTitle: string | null
   status: string
   logs: string
   activities: AgentActivity[]
@@ -29,11 +33,16 @@ interface AppState {
   setSelectedRepos: (r: Repo[]) => void
   run: RunState
   resetRun: () => void
+  hydrateActiveRun: (run: ActiveIssueRun | null) => void
   applyRunEvent: (e: RunEvent) => void
 }
 
 const initialRun: RunState = {
   runId: null,
+  repoOwner: null,
+  repoName: null,
+  issueNumber: null,
+  issueTitle: null,
   status: 'idle',
   logs: '',
   activities: [],
@@ -52,6 +61,39 @@ export const useApp = create<AppState>((set) => ({
   setSelectedRepos: (selectedRepos) => set({ selectedRepos }),
   run: initialRun,
   resetRun: () => set({ run: initialRun }),
+  hydrateActiveRun: (active) =>
+    set((s) => {
+      if (!active) {
+        return ['pending', 'running', 'awaiting-approval'].includes(s.run.status)
+          ? { run: initialRun }
+          : s
+      }
+      if (s.run.runId === active.run.id) {
+        return {
+          run: {
+            ...s.run,
+            repoOwner: active.repoOwner,
+            repoName: active.repoName,
+            issueNumber: active.issueNumber,
+            issueTitle: active.issueTitle,
+            status: active.run.status,
+            prNumber: active.run.prNumber
+          }
+        }
+      }
+      return {
+        run: {
+          ...initialRun,
+          runId: active.run.id,
+          repoOwner: active.repoOwner,
+          repoName: active.repoName,
+          issueNumber: active.issueNumber,
+          issueTitle: active.issueTitle,
+          status: active.run.status,
+          prNumber: active.run.prNumber
+        }
+      }
+    }),
   applyRunEvent: (e) =>
     set((s) => {
       const r = { ...s.run }
