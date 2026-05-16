@@ -27,7 +27,7 @@ export default function App() {
       setCheckingGate(false)
       if (gate.blocked) return
       return window.api.config.get().then((cfg) => {
-        if (!cfg.githubPatConfigured || !cfg.engineConfigured) {
+        if (!cfg.authConfigured) {
           setView({ kind: 'onboarding' })
         } else {
           setView({ kind: 'projects' })
@@ -63,7 +63,7 @@ export default function App() {
     setCheckingGate(false)
     if (!gate.blocked) {
       const cfg = await window.api.config.get()
-      if (!cfg.githubPatConfigured || !cfg.engineConfigured) {
+      if (!cfg.authConfigured) {
         setView({ kind: 'onboarding' })
       } else {
         setView({ kind: 'projects' })

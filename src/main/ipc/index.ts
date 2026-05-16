@@ -42,7 +42,8 @@ import {
   startGhRefreshScopes,
   ghSignOut,
   getAuthMode,
-  setAuthMode
+  setAuthMode,
+  ghGetToken
 } from '../services/ghAuth'
 import type {
   Project,
@@ -83,14 +84,35 @@ export function registerIpc(win: BrowserWindow) {
   // ── config ───────────────────────────────────────────
   ipcMain.handle(IPC.configGet, async (): Promise<AppConfig> => {
     const engine = getEngine()
-    const authMode = getAuthMode()
+    let authMode = getAuthMode()
     let ghLogin: string | null = null
+    let hasPat = gh.hasPat()
     if (authMode === 'gh') {
       const s = await ghAuthStatus()
       ghLogin = s.login ?? null
+      if (s.signedIn && !hasPat) {
+        const token = await ghGetToken()
+        if (token) {
+          gh.setPat(token)
+          hasPat = true
+        }
+      }
+    } else if (!authMode) {
+      const s = await ghAuthStatus()
+      if (s.signedIn) {
+        const token = await ghGetToken()
+        if (token) {
+          setAuthMode('gh')
+          gh.setPat(token)
+          authMode = 'gh'
+          ghLogin = s.login ?? null
+          hasPat = true
+        }
+      }
     }
     return {
-      githubPatConfigured: gh.hasPat(),
+      authConfigured: authMode === 'gh' ? !!ghLogin || hasPat : hasPat,
+      githubPatConfigured: hasPat,
       engineConfigured: !!engine,
       engine,
       authMode,
@@ -493,13 +515,13 @@ export function registerIpc(win: BrowserWindow) {
   )
   ipcMain.handle(
     IPC.featuresCommit,
-    (_e, args: { featureId: number; message: string }) =>
-      featureRunner.commitFeatureChanges(args.featureId, args.message)
+    (_e, args: { featureId: number; message: string; repoId?: number }) =>
+      featureRunner.commitFeatureChanges(args.featureId, args.message, args.repoId)
   )
   ipcMain.handle(
     IPC.featuresCommitPublish,
-    (_e, args: { featureId: number; message: string }) =>
-      featureRunner.commitAndPublishFeatureChanges(args.featureId, args.message)
+    (_e, args: { featureId: number; message: string; repoId?: number }) =>
+      featureRunner.commitAndPublishFeatureChanges(args.featureId, args.message, args.repoId)
   )
   ipcMain.handle(IPC.featuresPublish, (_e, featureId: number) =>
     featureRunner.publishFeatureBranches(featureId)

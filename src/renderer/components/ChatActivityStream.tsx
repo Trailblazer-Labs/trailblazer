@@ -39,15 +39,16 @@ export default function ChatActivityStream({
   emptyLabel?: string
 }) {
   const [expanded, setExpanded] = useState(false)
-  const summary = useMemo(() => summarizeActivity(items), [items])
-  const reasoning = items.filter((a) => a.kind === 'thinking' || a.kind === 'message')
-  const visibleReasoning = reasoning.length > 0 ? reasoning : latestNonCommandItems(items)
-  const latestRunning = [...items].reverse().find((a) => a.status === 'running')
+  const visibleItems = useMemo(() => items.filter((a) => !isSessionStartActivity(a)), [items])
+  const summary = useMemo(() => summarizeActivity(visibleItems), [visibleItems])
+  const reasoning = visibleItems.filter((a) => a.kind === 'thinking' || a.kind === 'message')
+  const visibleReasoning = reasoning.length > 0 ? reasoning : latestNonCommandItems(visibleItems)
+  const latestRunning = [...visibleItems].reverse().find((a) => a.status === 'running')
   const errorCount = summary.errors.length
   const ranCount =
     summary.commands.length + summary.changes.length + summary.inspect.length + summary.search.length
 
-  if (items.length === 0) {
+  if (visibleItems.length === 0) {
     return (
       <div className="max-w-3xl mx-auto">
         <div className="flex items-center gap-2 text-xs text-muted">
@@ -258,6 +259,10 @@ function toolCategory(a: AgentActivity): ActivityCategory {
     default:
       return 'system'
   }
+}
+
+function isSessionStartActivity(a: AgentActivity) {
+  return a.kind === 'system' && /^(Claude|Codex) session started$/i.test(a.label)
 }
 
 function iconFor(a: AgentActivity): LucideIcon {

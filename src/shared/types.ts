@@ -278,6 +278,7 @@ export interface EngineDetection {
 }
 
 export interface AppConfig {
+  authConfigured: boolean
   githubPatConfigured: boolean
   engineConfigured: boolean
   engine: Engine | null

@@ -338,7 +338,8 @@ export default function PlanningView({ projectId, repos }: { projectId: number; 
         void qc.invalidateQueries({ queryKey: ['plan-messages', activePlanId] })
       } else if (evt.type === 'error') {
         setAssistantRunning(false)
-        setAssistantError(evt.message)
+        // Terminal run errors are stored on the assistant message itself.
+        setAssistantError(null)
         void qc.invalidateQueries({ queryKey: ['plan-messages', activePlanId] })
       }
     })
@@ -661,7 +662,10 @@ export default function PlanningView({ projectId, repos }: { projectId: number; 
               onChange={(e) => setAssistantInput(e.target.value)}
               onPaste={(e) => {
                 const files = filesFromClipboard(e)
-                if (files.length > 0) void addAttachments(files)
+                if (files.length > 0) {
+                  e.preventDefault()
+                  void addAttachments(files)
+                }
               }}
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {

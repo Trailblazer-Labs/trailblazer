@@ -27,7 +27,13 @@ export async function filesToPromptAttachments(files: FileList | File[]): Promis
 }
 
 export function filesFromClipboard(e: ClipboardEvent): File[] {
-  return Array.from(e.clipboardData.files).filter((file) => file.type.startsWith('image/'))
+  const files = Array.from(e.clipboardData.files).filter((file) => file.type.startsWith('image/'))
+  if (files.length > 0) return files
+
+  return Array.from(e.clipboardData.items)
+    .filter((item) => item.kind === 'file' && item.type.startsWith('image/'))
+    .map((item) => item.getAsFile())
+    .filter((file): file is File => Boolean(file))
 }
 
 export function filesFromDrop(e: DragEvent): File[] {

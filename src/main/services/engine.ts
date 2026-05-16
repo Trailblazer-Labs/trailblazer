@@ -31,14 +31,34 @@ export function getEngine(): Engine | null {
 
 export function getEnginePath(engine: Engine): string {
   const stored = kvGetSecret(engine === 'claude' ? KEY_CLAUDE_PATH : KEY_CODEX_PATH)
-  return stored || (engine === 'claude' ? 'claude' : 'codex')
+  return usableEnginePath(stored) ?? defaultEngineBinary(engine)
 }
 
 export function setEngine(args: { engine: Engine; path?: string }) {
   kvSetSecret(KEY_ENGINE, args.engine)
-  if (args.path) {
-    kvSetSecret(args.engine === 'claude' ? KEY_CLAUDE_PATH : KEY_CODEX_PATH, args.path)
+  const path = usableEnginePath(args.path)
+  if (path) {
+    kvSetSecret(args.engine === 'claude' ? KEY_CLAUDE_PATH : KEY_CODEX_PATH, path)
   }
+}
+
+function defaultEngineBinary(engine: Engine): string {
+  return engine === 'claude' ? 'claude' : 'codex'
+}
+
+function usableEnginePath(value: string | null | undefined): string | null {
+  const trimmed = value?.trim()
+  if (!trimmed) return null
+  if (trimmed.includes('\0')) return null
+  if (/[\u0000-\u001f\u007f-\u009f]/.test(trimmed)) return null
+  if (trimmed.length > 512) return null
+  return trimmed
+}
+
+function installHint(engine: Engine): string {
+  return engine === 'claude'
+    ? 'npm i -g @anthropic-ai/claude-code'
+    : 'npm i -g @openai/codex'
 }
 
 function mergedPath(...parts: Array<string | undefined>): string {
@@ -181,9 +201,10 @@ export function spawnAgent(
   })
   proc.on('error', (e: NodeJS.ErrnoException) => {
     // Capture spawn errors (e.g., ENOENT when the platform binary is missing).
+    const pathLabel = bin === defaultEngineBinary(engine) ? bin : `configured path ${bin}`
     const msg =
       e.code === 'ENOENT'
-        ? `${engine} CLI binary not found at ${e.path}. Try reinstalling it (e.g. \`npm i -g @openai/${engine === 'codex' ? 'codex' : 'claude-code'}\`).`
+        ? `${engine} CLI binary not found at ${pathLabel}. Try reinstalling it (e.g. \`${installHint(engine)}\`) or update the project agent settings.`
         : `${engine} failed to start: ${e.message}`
     stderr += msg + '\n'
     onChunk?.('stderr', msg + '\n')

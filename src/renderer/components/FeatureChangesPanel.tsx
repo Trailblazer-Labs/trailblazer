@@ -64,6 +64,9 @@ export default function FeatureChangesPanel({
   const [commitMsg, setCommitMsg] = useState('')
   const [commitError, setCommitError] = useState<string | null>(null)
   const [commitResult, setCommitResult] = useState<FeatureCommitResult[] | null>(null)
+  const [repoCommit, setRepoCommit] = useState<{ repoId: number; message: string } | null>(null)
+  const [repoCommitting, setRepoCommitting] = useState<number | null>(null)
+  const [repoPublishing, setRepoPublishing] = useState<number | null>(null)
   const [rebranchRepo, setRebranchRepo] = useState<FeatureRepoChanges | null>(null)
 
   const totalFiles = useMemo(() => changes.reduce((n, r) => n + r.files.length, 0), [changes])
@@ -119,6 +122,35 @@ export default function FeatureChangesPanel({
       setCommitError(e instanceof Error ? e.message : 'publish failed')
     } finally {
       setPublishing(false)
+    }
+  }
+
+  async function commitRepo(repo: FeatureRepoChanges, publishAfter = false) {
+    const message = repoCommit?.repoId === repo.repoId ? repoCommit.message.trim() : ''
+    if (publishAfter) setRepoPublishing(repo.repoId)
+    else setRepoCommitting(repo.repoId)
+    setCommitError(null)
+    try {
+      const result = publishAfter
+        ? await window.api.features.commitAndPublish({
+            featureId,
+            repoId: repo.repoId,
+            message
+          })
+        : await window.api.features.commit({
+            featureId,
+            repoId: repo.repoId,
+            message
+          })
+      setCommitResult(result)
+      setRepoCommit(null)
+      void qc.invalidateQueries({ queryKey: ['feature-changes', featureId] })
+      void qc.invalidateQueries({ queryKey: ['feature-repos', featureId] })
+    } catch (e) {
+      setCommitError(e instanceof Error ? e.message : publishAfter ? 'publish failed' : 'commit failed')
+    } finally {
+      if (publishAfter) setRepoPublishing(null)
+      else setRepoCommitting(null)
     }
   }
 
@@ -349,7 +381,9 @@ export default function FeatureChangesPanel({
                     </span>
                     {repo.commitsAhead > 0 && (
                       <span className="text-[10px] text-accent tabular-nums">
-                        {repo.commitsAhead} ahead
+                        {repo.prNumber
+                          ? `${repo.commitsAhead} commit${repo.commitsAhead === 1 ? '' : 's'} in review`
+                          : `${repo.commitsAhead} ahead`}
                       </span>
                     )}
                     <span className="text-[10px] text-muted tabular-nums">{visible.length}</span>
@@ -390,6 +424,67 @@ export default function FeatureChangesPanel({
                         </div>
                       </li>
                     ))}
+                    {repo.hasUncommitted && (
+                      <li className="px-3 py-2 border-t border-border/40 bg-bg/35">
+                        {repoCommit?.repoId === repo.repoId ? (
+                          <div className="space-y-1.5">
+                            <input
+                              autoFocus
+                              value={repoCommit.message}
+                              onChange={(e) =>
+                                setRepoCommit({ repoId: repo.repoId, message: e.target.value })
+                              }
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') void commitRepo(repo)
+                                else if (e.key === 'Escape') setRepoCommit(null)
+                              }}
+                              placeholder={`Commit message for ${repo.repoName}`}
+                              className="no-drag w-full h-7 rounded bg-panel border border-border px-2 text-[11px] outline-none focus:border-accent"
+                            />
+                            <div className="flex items-center justify-end gap-2">
+                              <button
+                                onClick={() => setRepoCommit(null)}
+                                className="text-[11px] text-muted hover:text-text"
+                              >
+                                Cancel
+                              </button>
+                              <button
+                                onClick={() => void commitRepo(repo)}
+                                disabled={repoCommitting === repo.repoId || repoPublishing === repo.repoId}
+                                className="text-[11px] text-accent hover:text-text disabled:opacity-50"
+                              >
+                                {repoCommitting === repo.repoId ? 'Committing...' : 'Commit repo'}
+                              </button>
+                              <button
+                                onClick={() => void commitRepo(repo, true)}
+                                disabled={repoCommitting === repo.repoId || repoPublishing === repo.repoId}
+                                className="text-[11px] text-accent hover:text-text disabled:opacity-50"
+                              >
+                                {repoPublishing === repo.repoId ? 'Publishing...' : 'Commit & publish'}
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="min-w-0 text-[11px] text-muted">
+                              Uncommitted changes in this repo
+                            </div>
+                            <button
+                              onClick={() =>
+                                setRepoCommit({
+                                  repoId: repo.repoId,
+                                  message: `chore: update ${repo.repoName}`
+                                })
+                              }
+                              disabled={repoCommitting !== null || repoPublishing !== null}
+                              className="no-drag h-7 px-2.5 rounded-md border border-accent/40 bg-[#1a1414] text-[11px] text-accent hover:bg-[#221212] disabled:opacity-50"
+                            >
+                              Commit repo
+                            </button>
+                          </div>
+                        )}
+                      </li>
+                    )}
                   </ul>
                 )}
               </section>

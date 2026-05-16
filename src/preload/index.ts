@@ -270,11 +270,16 @@ const api = {
         | number
         | { featureId: number; scope?: 'overall' | 'session'; sessionId?: number }
     ): Promise<FeatureRepoChanges[]> => ipcRenderer.invoke(IPC.featuresGetChanges, args),
-    commit: (args: { featureId: number; message: string }): Promise<FeatureCommitResult[]> =>
+    commit: (args: {
+      featureId: number
+      message: string
+      repoId?: number
+    }): Promise<FeatureCommitResult[]> =>
       ipcRenderer.invoke(IPC.featuresCommit, args),
     commitAndPublish: (args: {
       featureId: number
       message: string
+      repoId?: number
     }): Promise<FeatureCommitResult[]> =>
       ipcRenderer.invoke(IPC.featuresCommitPublish, args),
     publish: (featureId: number): Promise<FeatureCommitResult[]> =>

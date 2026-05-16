@@ -21,7 +21,7 @@ import * as gh from './github'
 import { getAuthMode, ghGetToken } from './ghAuth'
 import { kvGetSecret } from './db'
 import { resolveProjectAgent, setProjectModel } from './projectPrefs'
-import { extractAgentApiError } from './agentErrors'
+import { extractAgentApiError, formatAgentExitError } from './agentErrors'
 import { AGENT_INSTRUCTIONS_FILE_PROMPT } from './agentInstructions'
 import type {
   AgentActivity,
@@ -249,8 +249,7 @@ export async function sendPrompt(args: {
     console.error(`[feature ${args.featureId}] ${engine} stderr:`, stderr)
     // eslint-disable-next-line no-console
     console.error(`[feature ${args.featureId}] ${engine} stdout:`, stdout)
-    const tail = (stderr || stdout).trim().split('\n').find((l) => /^(error|Error)/.test(l)) ?? ''
-    const msg = `${engine} exited with code ${code}${tail ? `: ${tail}` : ''}`
+    const msg = formatAgentExitError({ engine, code, stdout, stderr })
     updateAssistantMessage(assistantMessageId, msg, collected)
     // If session-resume failed, clear the CLI session so the next turn starts fresh.
     if (cliSessionId && /session|resume/i.test(stderr)) clearSessionCli(session.id)
@@ -479,12 +478,13 @@ export interface FeatureCommitResult {
  */
 export async function commitFeatureChanges(
   featureId: number,
-  message: string
+  message: string,
+  repoId?: number
 ): Promise<FeatureCommitResult[]> {
   const feature = getFeature(featureId)
   if (!feature) throw new Error('feature not found')
   const msg = message.trim() || `chore: ${feature.name} WIP`
-  const repos = listFeatureRepos(featureId)
+  const repos = targetFeatureRepos(featureId, repoId)
   const out: FeatureCommitResult[] = []
   for (const r of repos) {
     try {
@@ -518,12 +518,13 @@ export async function commitFeatureChanges(
 
 export async function commitAndPublishFeatureChanges(
   featureId: number,
-  message: string
+  message: string,
+  repoId?: number
 ): Promise<FeatureCommitResult[]> {
   const feature = getFeature(featureId)
   if (!feature) throw new Error('feature not found')
   const msg = message.trim() || `chore: ${feature.name} WIP`
-  const repos = listFeatureRepos(featureId)
+  const repos = targetFeatureRepos(featureId, repoId)
   const out: FeatureCommitResult[] = []
   for (const r of repos) {
     try {
@@ -586,6 +587,14 @@ export async function publishFeatureBranches(featureId: number): Promise<Feature
     }
   }
   return out
+}
+
+function targetFeatureRepos(featureId: number, repoId?: number): FeatureRepo[] {
+  const repos = listFeatureRepos(featureId)
+  if (typeof repoId !== 'number') return repos
+  const repo = repos.find((r) => r.repoId === repoId)
+  if (!repo) throw new Error('repo not found in feature')
+  return [repo]
 }
 
 export async function pullFeatureBranches(featureId: number): Promise<FeatureCommitResult[]> {
