@@ -5,7 +5,7 @@ import { app } from 'electron'
 import { getDb } from './db'
 import { spawnAgent } from './engine'
 import { resolveProjectAgent } from './projectPrefs'
-import { extractAgentApiError } from './agentErrors'
+import { extractAgentApiError, formatAgentExitError } from './agentErrors'
 import { createParser } from './agentParser'
 import { updatePlan } from './plans'
 import type {
@@ -174,8 +174,7 @@ export async function sendPrompt(args: {
     console.error(`[planning ${args.planId}] ${engine} stderr:`, stderr)
     // eslint-disable-next-line no-console
     console.error(`[planning ${args.planId}] ${engine} stdout:`, stdout)
-    const tail = (stderr || stdout).trim().split('\n').find((l) => /^(error|Error)/.test(l)) ?? ''
-    const msg = `${engine} exited with code ${code}${tail ? `: ${tail}` : ''}`
+    const msg = formatAgentExitError({ engine, code, stdout, stderr })
     updateAssistantMessage(assistantMessageId, msg, activities)
     emit({ type: 'error', planId: args.planId, message: msg })
     return { assistantMessageId }

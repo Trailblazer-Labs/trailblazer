@@ -196,9 +196,8 @@ export default function FeatureChatView({
         void qc.invalidateQueries({ queryKey: ['feature-sessions', featureId] })
         void qc.invalidateQueries({ queryKey: ['feature-changes', featureId] })
       } else if (evt.type === 'error') {
-        // Cancellation is a user-initiated halt, not an error worth banner-flagging.
-        // The message bubble itself renders a quiet "cancelled" status.
-        if (evt.message !== 'cancelled') setError(evt.message)
+        // The assistant message row stores terminal run errors, so don't duplicate
+        // the same text as a red page-level banner.
         setRunning(false)
         void qc.invalidateQueries({ queryKey: ['feature-messages', resolvedSessionId] })
       }
@@ -260,6 +259,7 @@ export default function FeatureChatView({
       const results = await window.api.features.createPRs(featureId)
       setPrResults(results)
       void qc.invalidateQueries({ queryKey: ['feature-repos', featureId] })
+      void qc.invalidateQueries({ queryKey: ['feature-changes', featureId] })
     } catch (e) {
       setError(e instanceof Error ? e.message : 'failed to create PRs')
     } finally {
@@ -440,7 +440,10 @@ export default function FeatureChatView({
                 onChange={(e) => setDraft(e.target.value)}
                 onPaste={(e) => {
                   const files = filesFromClipboard(e)
-                  if (files.length > 0) void addAttachments(files)
+                  if (files.length > 0) {
+                    e.preventDefault()
+                    void addAttachments(files)
+                  }
                 }}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {

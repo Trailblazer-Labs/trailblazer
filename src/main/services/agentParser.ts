@@ -26,16 +26,7 @@ function createClaudeParser(): AgentParser {
     }
     if (!ev || typeof ev !== 'object') return
 
-    if (ev.type === 'system' && ev.subtype === 'init') {
-      out.push({
-        id: randomUUID(),
-        kind: 'system',
-        label: 'Claude session started',
-        detail: ev.model ? `model: ${ev.model}` : undefined,
-        ts: Date.now()
-      })
-      return
-    }
+    if (ev.type === 'system' && ev.subtype === 'init') return
 
     if (ev.type === 'assistant' && ev.message?.content) {
       for (const c of ev.message.content) {
@@ -387,16 +378,7 @@ function createCodexParser(): AgentParser {
     }
 
     // ─── Lifecycle ────────────────────────────────────────────────────
-    if (type === 'thread.started' || type === 'session.started' || type === 'session_configured') {
-      out.push({
-        id: randomUUID(),
-        kind: 'system',
-        label: 'Codex session started',
-        detail: msg.thread_id ? `thread: ${msg.thread_id.slice(0, 8)}` : undefined,
-        ts: now
-      })
-      return
-    }
+    if (type === 'thread.started' || type === 'session.started' || type === 'session_configured') return
     if (type === 'turn.started') {
       // Quiet — turn boundaries don't add value in the activity feed.
       return

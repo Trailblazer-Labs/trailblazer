@@ -100,13 +100,14 @@ export default function ActivityList({
   const ref = useRef<HTMLDivElement>(null)
   const stickRef = useRef(true)
   const [expanded, setExpanded] = useState<Record<string, boolean>>({})
-  const grouped = useMemo(() => groupActivities(items), [items])
+  const visibleItems = useMemo(() => items.filter((a) => !isSessionStartActivity(a)), [items])
+  const grouped = useMemo(() => groupActivities(visibleItems), [visibleItems])
   const latestRunning = useMemo(
-    () => [...items].reverse().find((a) => a.status === 'running'),
-    [items]
+    () => [...visibleItems].reverse().find((a) => a.status === 'running'),
+    [visibleItems]
   )
   const runningCategory = latestRunning ? toolCategory(latestRunning) : null
-  const hasErrors = items.some((a) => a.kind === 'error' || a.status === 'failed')
+  const hasErrors = visibleItems.some((a) => a.kind === 'error' || a.status === 'failed')
 
   useEffect(() => {
     const el = ref.current
@@ -123,7 +124,7 @@ export default function ActivityList({
     if (stickRef.current && ref.current) {
       ref.current.scrollTop = ref.current.scrollHeight
     }
-  }, [items])
+  }, [visibleItems])
 
   useEffect(() => {
     if (!busy && !hasErrors) return
@@ -150,7 +151,7 @@ export default function ActivityList({
     prevBusyRef.current = busy
   }, [busy, hasErrors])
 
-  if (items.length === 0) {
+  if (visibleItems.length === 0) {
     return (
       <div className="rounded-md border border-border bg-bg/50 p-3">
         <div className="flex items-center gap-2 text-xs text-muted">
@@ -168,7 +169,7 @@ export default function ActivityList({
       className="rounded-md border border-border bg-bg/45 max-h-[360px] overflow-auto shadow-inner shadow-black/20"
     >
       <ActivitySummary
-        items={items}
+        items={visibleItems}
         groups={grouped}
         engineLabel={engineLabel}
         busy={busy}
@@ -493,6 +494,10 @@ function iconColor(a: AgentActivity): string {
   if (a.kind === 'message') return 'text-muted'
   if (a.kind === 'thinking') return 'text-muted'
   return 'text-muted'
+}
+
+function isSessionStartActivity(a: AgentActivity) {
+  return a.kind === 'system' && /^(Claude|Codex) session started$/i.test(a.label)
 }
 
 /**
