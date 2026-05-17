@@ -56,17 +56,13 @@ export default function FeatureChangesPanel({
     file: FeatureChangedFile
   } | null>(null)
   const [collapsed, setCollapsed] = useState<Record<number, boolean>>({})
-  const [committing, setCommitting] = useState(false)
-  const [publishing, setPublishing] = useState(false)
-  const [pushing, setPushing] = useState(false)
-  const [pulling, setPulling] = useState(false)
-  const [showCommit, setShowCommit] = useState(false)
-  const [commitMsg, setCommitMsg] = useState('')
   const [commitError, setCommitError] = useState<string | null>(null)
   const [commitResult, setCommitResult] = useState<FeatureCommitResult[] | null>(null)
   const [repoCommit, setRepoCommit] = useState<{ repoId: number; message: string } | null>(null)
   const [repoCommitting, setRepoCommitting] = useState<number | null>(null)
   const [repoPublishing, setRepoPublishing] = useState<number | null>(null)
+  const [repoPushing, setRepoPushing] = useState<number | null>(null)
+  const [repoPulling, setRepoPulling] = useState<number | null>(null)
   const [rebranchRepo, setRebranchRepo] = useState<FeatureRepoChanges | null>(null)
 
   const totalFiles = useMemo(() => changes.reduce((n, r) => n + r.files.length, 0), [changes])
@@ -81,48 +77,6 @@ export default function FeatureChangesPanel({
 
   function refresh() {
     void qc.invalidateQueries({ queryKey: ['feature-changes', featureId] })
-  }
-
-  const hasUncommitted = changes.some((r) => r.hasUncommitted)
-  const hasPendingCommits = changes.some((r) => r.commitsAhead > 0)
-
-  async function commit() {
-    setCommitting(true)
-    setCommitError(null)
-    try {
-      const result = await window.api.features.commit({
-        featureId,
-        message: commitMsg.trim()
-      })
-      setCommitResult(result)
-      setShowCommit(false)
-      setCommitMsg('')
-      void qc.invalidateQueries({ queryKey: ['feature-changes', featureId] })
-    } catch (e) {
-      setCommitError(e instanceof Error ? e.message : 'commit failed')
-    } finally {
-      setCommitting(false)
-    }
-  }
-
-  async function commitAndPublish() {
-    setPublishing(true)
-    setCommitError(null)
-    try {
-      const result = await window.api.features.commitAndPublish({
-        featureId,
-        message: commitMsg.trim()
-      })
-      setCommitResult(result)
-      setShowCommit(false)
-      setCommitMsg('')
-      void qc.invalidateQueries({ queryKey: ['feature-changes', featureId] })
-      void qc.invalidateQueries({ queryKey: ['feature-repos', featureId] })
-    } catch (e) {
-      setCommitError(e instanceof Error ? e.message : 'publish failed')
-    } finally {
-      setPublishing(false)
-    }
   }
 
   async function commitRepo(repo: FeatureRepoChanges, publishAfter = false) {
@@ -154,33 +108,33 @@ export default function FeatureChangesPanel({
     }
   }
 
-  async function publish() {
-    setPushing(true)
+  async function publishRepo(repo: FeatureRepoChanges) {
+    setRepoPushing(repo.repoId)
     setCommitError(null)
     try {
-      const result = await window.api.features.publish(featureId)
+      const result = await window.api.features.publish({ featureId, repoId: repo.repoId })
       setCommitResult(result)
       void qc.invalidateQueries({ queryKey: ['feature-changes', featureId] })
       void qc.invalidateQueries({ queryKey: ['feature-repos', featureId] })
     } catch (e) {
       setCommitError(e instanceof Error ? e.message : 'push failed')
     } finally {
-      setPushing(false)
+      setRepoPushing(null)
     }
   }
 
-  async function pull() {
-    setPulling(true)
+  async function pullRepo(repo: FeatureRepoChanges) {
+    setRepoPulling(repo.repoId)
     setCommitError(null)
     try {
-      const result = await window.api.features.pull(featureId)
+      const result = await window.api.features.pull({ featureId, repoId: repo.repoId })
       setCommitResult(result)
       void qc.invalidateQueries({ queryKey: ['feature-changes', featureId] })
       void qc.invalidateQueries({ queryKey: ['feature-repos', featureId] })
     } catch (e) {
       setCommitError(e instanceof Error ? e.message : 'pull failed')
     } finally {
-      setPulling(false)
+      setRepoPulling(null)
     }
   }
 
@@ -225,8 +179,8 @@ export default function FeatureChangesPanel({
             </svg>
           </button>
         </div>
-        <div className="px-3 mt-2 flex items-center gap-2">
-          {sessionId && (
+        {sessionId && (
+          <div className="px-3 mt-2 flex items-center gap-2">
             <div className="inline-flex p-0.5 rounded-md border border-border bg-bg">
               <ScopeTab active={scope === 'session'} onClick={() => setScope('session')}>
                 This session
@@ -234,76 +188,6 @@ export default function FeatureChangesPanel({
               <ScopeTab active={scope === 'overall'} onClick={() => setScope('overall')}>
                 Overall
               </ScopeTab>
-            </div>
-          )}
-          <div className="flex-1" />
-          <button
-            onClick={pull}
-            disabled={committing || publishing || pushing || pulling}
-            className="no-drag h-7 px-2.5 rounded-md border border-border bg-panel text-[11px] text-muted hover:text-text hover:bg-[#1d1d1d] disabled:opacity-50"
-          >
-            {pulling ? 'Pulling...' : 'Pull'}
-          </button>
-          {hasUncommitted && (
-            <button
-              onClick={() => setShowCommit((v) => !v)}
-              disabled={committing || publishing || pushing || pulling}
-              className="no-drag h-7 px-2.5 rounded-md border border-accent/40 bg-[#1a1414] text-[11px] text-accent hover:bg-[#221212] disabled:opacity-50"
-            >
-              {publishing ? 'Publishing…' : committing ? 'Committing…' : 'Commit'}
-            </button>
-          )}
-          {!hasUncommitted && hasPendingCommits && (
-            <button
-              onClick={publish}
-              disabled={committing || publishing || pushing || pulling}
-              className="no-drag h-7 px-2.5 rounded-md border border-accent/40 bg-[#1a1414] text-[11px] text-accent hover:bg-[#221212] disabled:opacity-50"
-            >
-              {pushing ? 'Pushing…' : 'Push'}
-            </button>
-          )}
-        </div>
-        {showCommit && (
-          <div className="px-3 mt-2 mb-2 space-y-1.5">
-            <input
-              autoFocus
-              value={commitMsg}
-              onChange={(e) => setCommitMsg(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') void commit()
-                else if (e.key === 'Escape') {
-                  setShowCommit(false)
-                  setCommitMsg('')
-                }
-              }}
-              placeholder="Commit message (Enter to commit, Esc to cancel)"
-              className="no-drag w-full h-7 rounded bg-panel border border-border px-2 text-[11px] outline-none focus:border-accent"
-            />
-            {commitError && <div className="text-[10px] text-red-400">{commitError}</div>}
-            <div className="flex gap-1.5 justify-end">
-              <button
-                onClick={() => {
-                  setShowCommit(false)
-                  setCommitMsg('')
-                }}
-                className="text-[11px] text-muted hover:text-text"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={commit}
-                disabled={committing || publishing}
-                className="text-[11px] text-accent hover:text-text disabled:opacity-50"
-              >
-                Commit all
-              </button>
-              <button
-                onClick={commitAndPublish}
-                disabled={committing || publishing}
-                className="text-[11px] text-accent hover:text-text disabled:opacity-50"
-              >
-                Commit & publish
-              </button>
             </div>
           </div>
         )}
@@ -338,6 +222,11 @@ export default function FeatureChangesPanel({
             </button>
           </div>
         )}
+        {commitError && (
+          <div className="px-3 mt-1 mb-2 text-[10px] leading-4 text-red-400">
+            {commitError}
+          </div>
+        )}
       </header>
 
       <div className="px-3 py-2 border-b border-border shrink-0">
@@ -365,38 +254,58 @@ export default function FeatureChangesPanel({
             const open = !collapsed[repo.repoId]
             return (
               <section key={repo.repoId} className="border-b border-border/60">
-                <div className="flex items-center gap-2 px-3 py-2 hover:bg-panel/60">
+                <div className="px-3 py-2 hover:bg-panel/60">
                   <button
                     onClick={() =>
                       setCollapsed((prev) => ({ ...prev, [repo.repoId]: !prev[repo.repoId] }))
                     }
-                    className="min-w-0 flex flex-1 items-center gap-2 text-left"
+                    className="min-w-0 flex w-full items-start gap-2 text-left"
                   >
-                    <span className={cn('text-muted text-[10px] transition-transform', open && 'rotate-90')}>
+                    <span className={cn('mt-0.5 text-muted text-[10px] transition-transform', open && 'rotate-90')}>
                       ▶
                     </span>
-                    <span className="text-xs flex-1 truncate">{repo.repoName}</span>
-                    <span className="hidden xl:inline text-[10px] text-muted truncate">
-                      {repo.branch} · base {repo.baseBranch}
-                    </span>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs flex-1 truncate">{repo.repoName}</span>
+                        <DiffStat additions={sumAdditions(visible)} deletions={sumDeletions(visible)} />
+                      </div>
+                      <RepoMeta repo={repo} fileCount={visible.length} />
+                    </div>
+                  </button>
+                  <div className="mt-2 ml-5 flex flex-wrap items-center gap-1.5">
+                    <RepoActionButton
+                      onClick={() => void pullRepo(repo)}
+                      disabled={repoPulling !== null || repoPushing !== null || repoCommitting !== null || repoPublishing !== null}
+                    >
+                      {repoPulling === repo.repoId ? 'Pulling...' : 'Pull'}
+                    </RepoActionButton>
+                    {repo.hasUncommitted && (
+                      <RepoActionButton
+                        tone="accent"
+                        onClick={() =>
+                          setRepoCommit({
+                            repoId: repo.repoId,
+                            message: `chore: update ${repo.repoName}`
+                          })
+                        }
+                        disabled={repoCommitting !== null || repoPublishing !== null}
+                      >
+                        Commit
+                      </RepoActionButton>
+                    )}
                     {repo.commitsAhead > 0 && (
-                      <span className="text-[10px] text-accent tabular-nums">
-                        {repo.prNumber
-                          ? `${repo.commitsAhead} commit${repo.commitsAhead === 1 ? '' : 's'} in review`
-                          : `${repo.commitsAhead} ahead`}
-                      </span>
+                      <RepoActionButton
+                        tone="accent"
+                        onClick={() => void publishRepo(repo)}
+                        disabled={repoPulling !== null || repoPushing !== null || repoCommitting !== null || repoPublishing !== null}
+                      >
+                        {repoPushing === repo.repoId ? 'Pushing...' : repo.prNumber ? 'Push updates' : 'Push'}
+                      </RepoActionButton>
                     )}
-                    <span className="text-[10px] text-muted tabular-nums">{visible.length}</span>
-                    {repo.prNumber && (
-                      <Pill tone={prTone(repo.prState)}>PR #{repo.prNumber}</Pill>
-                    )}
-                  </button>
-                  <button
-                    onClick={() => setRebranchRepo(repo)}
-                    className="no-drag rounded border border-border bg-panel px-1.5 py-0.5 text-[10px] text-muted hover:text-text hover:bg-[#1d1d1d]"
-                  >
-                    New branch
-                  </button>
+                    <RepoActionButton onClick={() => setRebranchRepo(repo)}>
+                      New branch
+                    </RepoActionButton>
+                  </div>
                 </div>
                 {open && (
                   <ul>
@@ -411,16 +320,15 @@ export default function FeatureChangesPanel({
                       >
                         <FileStatusGlyph status={f.status} state={f.state} />
                         <div className="flex-1 min-w-0">
-                          <div className="text-[12px] font-mono truncate">{f.path}</div>
+                          <FilePathDisplay path={f.path} />
                           {f.state === 'uncommitted' && (
                             <div className="text-[9px] uppercase tracking-wider text-amber-400/80">
                               Uncommitted
                             </div>
                           )}
                         </div>
-                        <div className="text-[10px] font-mono tabular-nums shrink-0">
-                          <span className="text-green-400">+{f.additions}</span>{' '}
-                          <span className="text-red-400">−{f.deletions}</span>
+                        <div className="w-[58px] text-right">
+                          <DiffStat additions={f.additions} deletions={f.deletions} />
                         </div>
                       </li>
                     ))}
@@ -479,7 +387,7 @@ export default function FeatureChangesPanel({
                               disabled={repoCommitting !== null || repoPublishing !== null}
                               className="no-drag h-7 px-2.5 rounded-md border border-accent/40 bg-[#1a1414] text-[11px] text-accent hover:bg-[#221212] disabled:opacity-50"
                             >
-                              Commit repo
+                              Commit
                             </button>
                           </div>
                         )}
@@ -1011,6 +919,82 @@ function prTone(state: FeatureRepoChanges['prState']): 'open' | 'merged' | 'clos
   if (state === 'merged') return 'merged'
   if (state === 'closed') return 'closed'
   return 'open'
+}
+
+function sumAdditions(files: FeatureChangedFile[]): number {
+  return files.reduce((n, f) => n + f.additions, 0)
+}
+
+function sumDeletions(files: FeatureChangedFile[]): number {
+  return files.reduce((n, f) => n + f.deletions, 0)
+}
+
+function DiffStat({ additions, deletions }: { additions: number; deletions: number }) {
+  if (additions === 0 && deletions === 0) return null
+  return (
+    <span className="shrink-0 text-[10px] font-mono tabular-nums">
+      <span className="text-green-400">+{additions}</span>{' '}
+      <span className="text-red-400">−{deletions}</span>
+    </span>
+  )
+}
+
+function RepoMeta({ repo, fileCount }: { repo: FeatureRepoChanges; fileCount: number }) {
+  const bits = [
+    repo.branch,
+    `base ${repo.baseBranch}`,
+    `${fileCount} file${fileCount === 1 ? '' : 's'}`
+  ]
+  if (repo.commitsAhead > 0) {
+    bits.push(
+      repo.prNumber
+        ? `${repo.commitsAhead} commit${repo.commitsAhead === 1 ? '' : 's'} in review`
+        : `${repo.commitsAhead} ahead`
+    )
+  }
+  if (repo.hasUncommitted) bits.push('uncommitted')
+
+  return (
+    <div className="mt-1 flex min-w-0 items-center gap-1.5 text-[10px] text-muted">
+      <span className="min-w-0 truncate font-mono">{bits.join(' · ')}</span>
+      {repo.prNumber && <Pill tone={prTone(repo.prState)}>PR #{repo.prNumber}</Pill>}
+    </div>
+  )
+}
+
+function RepoActionButton({
+  children,
+  className,
+  tone = 'default',
+  ...props
+}: React.ButtonHTMLAttributes<HTMLButtonElement> & { tone?: 'default' | 'accent' }) {
+  return (
+    <button
+      className={cn(
+        'no-drag h-6 rounded-md border px-2 text-[10px] transition-colors disabled:opacity-50',
+        tone === 'accent'
+          ? 'border-accent/40 bg-[#1a1414] text-accent hover:bg-[#221212]'
+          : 'border-border bg-panel text-muted hover:bg-[#1d1d1d] hover:text-text',
+        className
+      )}
+      {...props}
+    >
+      {children}
+    </button>
+  )
+}
+
+function FilePathDisplay({ path }: { path: string }) {
+  const slash = path.lastIndexOf('/')
+  const dir = slash >= 0 ? path.slice(0, slash + 1) : ''
+  const name = slash >= 0 ? path.slice(slash + 1) : path
+
+  return (
+    <div className="truncate font-mono text-[12px]">
+      {dir && <span className="text-muted/75">{dir}</span>}
+      <span>{name}</span>
+    </div>
+  )
 }
 
 function FileStatusGlyph({

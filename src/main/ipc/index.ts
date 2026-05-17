@@ -498,8 +498,15 @@ export function registerIpc(win: BrowserWindow) {
   ipcMain.handle(IPC.featuresCancelTurn, (_e, featureId: number) =>
     featureRunner.cancelRun(featureId)
   )
-  ipcMain.handle(IPC.featuresCreatePRs, (_e, featureId: number) =>
-    featureRunner.createPRs(featureId)
+  ipcMain.handle(IPC.featuresPreviewPRs, (_e, featureId: number) =>
+    featureRunner.previewPRs(featureId)
+  )
+  ipcMain.handle(
+    IPC.featuresCreatePRs,
+    (_e, args: number | { featureId: number; repoIds?: number[] }) => {
+      const a = typeof args === 'number' ? { featureId: args } : args
+      return featureRunner.createPRs(a.featureId, a.repoIds)
+    }
   )
   ipcMain.handle(
     IPC.featuresGetChanges,
@@ -524,12 +531,14 @@ export function registerIpc(win: BrowserWindow) {
     (_e, args: { featureId: number; message: string; repoId?: number }) =>
       featureRunner.commitAndPublishFeatureChanges(args.featureId, args.message, args.repoId)
   )
-  ipcMain.handle(IPC.featuresPublish, (_e, featureId: number) =>
-    featureRunner.publishFeatureBranches(featureId)
-  )
-  ipcMain.handle(IPC.featuresPull, (_e, featureId: number) =>
-    featureRunner.pullFeatureBranches(featureId)
-  )
+  ipcMain.handle(IPC.featuresPublish, (_e, args: number | { featureId: number; repoId?: number }) => {
+    const a = typeof args === 'number' ? { featureId: args } : args
+    return featureRunner.publishFeatureBranches(a.featureId, a.repoId)
+  })
+  ipcMain.handle(IPC.featuresPull, (_e, args: number | { featureId: number; repoId?: number }) => {
+    const a = typeof args === 'number' ? { featureId: args } : args
+    return featureRunner.pullFeatureBranches(a.featureId, a.repoId)
+  })
   ipcMain.handle(
     IPC.featuresDevRun,
     (_e, args: { featureId: number; repoId: number; command: string; cwd?: string }) =>

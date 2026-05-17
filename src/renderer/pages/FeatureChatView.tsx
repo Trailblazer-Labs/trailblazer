@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Button } from '../components/ui'
+import { Button, Card } from '../components/ui'
 import { useApp } from '../stores/app'
 import { applyActivity } from '../components/ActivityList'
 import ChatActivityStream from '../components/ChatActivityStream'
 import { filesFromClipboard, filesFromDrop, filesToPromptAttachments } from '../lib/chatAttachments'
 import PRResultsModal from '../components/PRResultsModal'
+import { Modal } from '../components/NewIssueModal'
 import FeatureSwitcher, { useFeatureSwitcherCollapsed } from '../components/FeatureSwitcher'
 import FeatureChangesPanel from '../components/FeatureChangesPanel'
 import { cn } from '../lib/cn'
@@ -23,6 +24,7 @@ import type {
   FeatureSession,
   PlanPromptAttachment,
   PRCreateResult,
+  PRPreviewRepo,
   Project,
   Repo
 } from '@shared/types'
@@ -81,6 +83,8 @@ export default function FeatureChatView({
   const [perRepoSummary, setPerRepoSummary] = useState<RepoSummary[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [prResults, setPrResults] = useState<PRCreateResult[] | null>(null)
+  const [prPreview, setPrPreview] = useState<PRPreviewRepo[] | null>(null)
+  const [previewingPRs, setPreviewingPRs] = useState(false)
   const [creatingPRs, setCreatingPRs] = useState(false)
 
   useEffect(() => {
@@ -255,10 +259,23 @@ export default function FeatureChatView({
     await window.api.features.cancelTurn(featureId)
   }
 
-  async function createPRs() {
+  async function previewPRs() {
+    setPreviewingPRs(true)
+    try {
+      const preview = await window.api.features.previewPRs(featureId)
+      setPrPreview(preview)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'failed to preview PRs')
+    } finally {
+      setPreviewingPRs(false)
+    }
+  }
+
+  async function createPRs(repoIds: number[]) {
     setCreatingPRs(true)
     try {
-      const results = await window.api.features.createPRs(featureId)
+      const results = await window.api.features.createPRs(featureId, repoIds)
+      setPrPreview(null)
       setPrResults(results)
       void qc.invalidateQueries({ queryKey: ['feature-repos', featureId] })
       void qc.invalidateQueries({ queryKey: ['feature-changes', featureId] })
@@ -384,8 +401,8 @@ export default function FeatureChatView({
             >
               + New session
             </Button>
-            <Button variant="primary" disabled={creatingPRs} onClick={createPRs}>
-              {creatingPRs ? 'Opening PRs…' : 'Create PRs'}
+            <Button variant="primary" disabled={previewingPRs || creatingPRs} onClick={previewPRs}>
+              {previewingPRs ? 'Checking PRs...' : creatingPRs ? 'Opening PRs...' : 'Create PRs'}
             </Button>
           </div>
         </header>
@@ -558,6 +575,14 @@ export default function FeatureChatView({
       </div>
       </div>
 
+      {prPreview && (
+        <PRPreviewModal
+          repos={prPreview}
+          creating={creatingPRs}
+          onClose={() => setPrPreview(null)}
+          onConfirm={(repoIds) => void createPRs(repoIds)}
+        />
+      )}
       {prResults && <PRResultsModal results={prResults} onClose={() => setPrResults(null)} />}
     </div>
   )
@@ -631,6 +656,116 @@ function ChatModelPicker({
       )}
       {!isCustom && <option value="__custom__">Custom…</option>}
     </select>
+  )
+}
+
+function PRPreviewModal({
+  repos,
+  creating,
+  onClose,
+  onConfirm
+}: {
+  repos: PRPreviewRepo[]
+  creating: boolean
+  onClose: () => void
+  onConfirm: (repoIds: number[]) => void
+}) {
+  const eligible = repos.filter((r) => r.eligible)
+  const skipped = repos.filter((r) => !r.eligible)
+
+  return (
+    <Modal onClose={creating ? () => {} : onClose}>
+      <Card className="w-[720px] max-h-[82vh] overflow-hidden flex flex-col">
+        <header className="px-5 py-4 border-b border-border">
+          <div className="text-sm text-muted">Pull requests</div>
+          <h2 className="font-brand text-xl">
+            {eligible.length} new PR{eligible.length === 1 ? '' : 's'} ready
+          </h2>
+        </header>
+
+        <div className="min-h-0 flex-1 overflow-auto p-5 space-y-4">
+          {eligible.length > 0 ? (
+            <ul className="divide-y divide-border/60 rounded-md border border-border bg-bg">
+              {eligible.map((repo) => (
+                <li key={repo.repoId} className="px-3 py-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-sm">{repo.repoName}</div>
+                      <div className="mt-1 truncate font-mono text-[10px] text-muted">
+                        {repo.branch}{' -> '}{repo.baseBranch}
+                      </div>
+                    </div>
+                    <div className="shrink-0 text-right text-[10px] text-muted tabular-nums">
+                      <div>{repo.commitsAhead} commit{repo.commitsAhead === 1 ? '' : 's'} ahead</div>
+                      <div>{repo.filesChanged} file{repo.filesChanged === 1 ? '' : 's'}</div>
+                    </div>
+                  </div>
+                  {repo.hasUncommitted && (
+                    <div className="mt-2 text-[11px] text-amber-300">
+                      Uncommitted changes will be committed before opening the PR.
+                    </div>
+                  )}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <div className="rounded-md border border-border bg-bg px-4 py-5 text-sm text-muted">
+              No repos need a new pull request.
+            </div>
+          )}
+
+          {skipped.length > 0 && (
+            <div>
+              <div className="mb-2 text-[10px] uppercase tracking-wider text-muted">
+                Skipped
+              </div>
+              <ul className="divide-y divide-border/50 rounded-md border border-border/70 bg-bg/60">
+                {skipped.map((repo) => (
+                  <li key={repo.repoId} className="px-3 py-2.5 flex items-center gap-3">
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-xs">{repo.repoName}</div>
+                      <div className="truncate font-mono text-[10px] text-muted">
+                        {repo.branch}
+                      </div>
+                    </div>
+                    {repo.existingPrUrl && repo.existingPrNumber ? (
+                      <a
+                        href={repo.existingPrUrl}
+                        onClick={(e) => {
+                          e.preventDefault()
+                          void window.api.shell.openExternal(repo.existingPrUrl!)
+                        }}
+                        className="shrink-0 text-[11px] text-accent underline"
+                      >
+                        PR #{repo.existingPrNumber}
+                      </a>
+                    ) : null}
+                    <div className="max-w-[260px] truncate text-right text-[11px] text-muted">
+                      {repo.reason}
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+
+        <footer className="flex items-center justify-between gap-3 border-t border-border px-5 py-4">
+          <Button onClick={onClose} disabled={creating}>
+            Cancel
+          </Button>
+          <Button
+            variant="primary"
+            disabled={creating || eligible.length === 0}
+            onClick={() => onConfirm(eligible.map((r) => r.repoId))}
+          >
+            {creating
+              ? 'Creating...'
+              : `Create ${eligible.length} PR${eligible.length === 1 ? '' : 's'}`}
+          </Button>
+        </footer>
+      </Card>
+    </Modal>
   )
 }
 
