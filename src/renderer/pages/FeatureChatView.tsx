@@ -692,7 +692,7 @@ function PRPreviewModal({
                     <div className="min-w-0 flex-1">
                       <div className="truncate text-sm">{repo.repoName}</div>
                       <div className="mt-1 truncate font-mono text-[10px] text-muted">
-                        {repo.branch} -> {repo.baseBranch}
+                        {repo.branch}{' -> '}{repo.baseBranch}
                       </div>
                     </div>
                     <div className="shrink-0 text-right text-[10px] text-muted tabular-nums">
