@@ -6,8 +6,10 @@ type View =
   | { kind: 'loading' }
   | { kind: 'onboarding' }
   | { kind: 'projects' }
-  | { kind: 'project'; projectId: number; tab?: 'features' | 'planning' | 'issues' }
+  | { kind: 'project'; projectId: number; tab?: 'features' | 'planning' | 'issues'; planId?: number }
   | { kind: 'feature'; projectId: number; featureId: number; sessionId?: number; initialDraft?: string }
+
+const VIEW_STORAGE_KEY = 'trailblazer:last-view'
 
 interface RunState {
   runId: string | null
@@ -54,7 +56,10 @@ const initialRun: RunState = {
 
 export const useApp = create<AppState>((set) => ({
   view: { kind: 'loading' },
-  setView: (view) => set({ view }),
+  setView: (view) => {
+    persistView(view)
+    set({ view })
+  },
   selectedProject: null,
   setSelectedProject: (p) => set({ selectedProject: p }),
   selectedRepos: [],
@@ -109,3 +114,62 @@ export const useApp = create<AppState>((set) => ({
       return { run: r }
     })
 }))
+
+export function restoreLastView(): View {
+  if (typeof window === 'undefined') return { kind: 'projects' }
+  try {
+    const raw = window.localStorage.getItem(VIEW_STORAGE_KEY)
+    if (!raw) return { kind: 'projects' }
+    return normalizeStoredView(JSON.parse(raw))
+  } catch {
+    return { kind: 'projects' }
+  }
+}
+
+function persistView(view: View) {
+  if (typeof window === 'undefined') return
+  const stable = stableView(view)
+  if (!stable) return
+  window.localStorage.setItem(VIEW_STORAGE_KEY, JSON.stringify(stable))
+}
+
+function stableView(view: View): View | null {
+  if (view.kind === 'projects') return view
+  if (view.kind === 'project') return view
+  if (view.kind === 'feature') {
+    const { initialDraft: _initialDraft, ...stable } = view
+    return stable
+  }
+  return null
+}
+
+function normalizeStoredView(value: unknown): View {
+  if (!value || typeof value !== 'object') return { kind: 'projects' }
+  const view = value as Partial<View>
+  if (view.kind === 'projects') return { kind: 'projects' }
+  if (view.kind === 'project' && typeof view.projectId === 'number') {
+    const tab =
+      view.tab === 'features' || view.tab === 'planning' || view.tab === 'issues'
+        ? view.tab
+        : undefined
+    return {
+      kind: 'project',
+      projectId: view.projectId,
+      tab,
+      planId: typeof view.planId === 'number' ? view.planId : undefined
+    }
+  }
+  if (
+    view.kind === 'feature' &&
+    typeof view.projectId === 'number' &&
+    typeof view.featureId === 'number'
+  ) {
+    return {
+      kind: 'feature',
+      projectId: view.projectId,
+      featureId: view.featureId,
+      sessionId: typeof view.sessionId === 'number' ? view.sessionId : undefined
+    }
+  }
+  return { kind: 'projects' }
+}

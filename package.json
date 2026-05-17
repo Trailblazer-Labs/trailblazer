@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "description": "Multi-repo issue→PR orchestrator",
+  "license": "GPL-3.0-only",
   "main": "out/main/index.js",
   "author": "Trailblazer",
   "scripts": {

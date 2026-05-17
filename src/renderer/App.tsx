@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { useApp } from './stores/app'
+import { restoreLastView, useApp } from './stores/app'
 import Onboarding from './pages/Onboarding'
 import Projects from './pages/Projects'
 import ProjectView from './pages/ProjectView'
@@ -30,7 +30,7 @@ export default function App() {
         if (!cfg.authConfigured) {
           setView({ kind: 'onboarding' })
         } else {
-          setView({ kind: 'projects' })
+          setView(restoreLastView())
         }
       })
     }).catch(() => {
@@ -66,7 +66,7 @@ export default function App() {
       if (!cfg.authConfigured) {
         setView({ kind: 'onboarding' })
       } else {
-        setView({ kind: 'projects' })
+        setView(restoreLastView())
       }
     }
   }
@@ -92,7 +92,13 @@ export default function App() {
             )}
             {view.kind === 'onboarding' && <Onboarding />}
             {view.kind === 'projects' && <Projects />}
-            {view.kind === 'project' && <ProjectView projectId={view.projectId} initialTab={view.tab} />}
+            {view.kind === 'project' && (
+              <ProjectView
+                projectId={view.projectId}
+                initialTab={view.tab}
+                initialPlanId={view.planId}
+              />
+            )}
             {view.kind === 'feature' && (
               <FeatureChatView
                 projectId={view.projectId}

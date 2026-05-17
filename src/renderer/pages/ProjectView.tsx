@@ -22,10 +22,12 @@ type ProjectTab = 'issues' | 'features' | 'planning'
 
 export default function ProjectView({
   projectId,
-  initialTab = 'features'
+  initialTab = 'features',
+  initialPlanId
 }: {
   projectId: number
   initialTab?: ProjectTab
+  initialPlanId?: number
 }) {
   const setView = useApp((s) => s.setView)
   const runStatus = useApp((s) => s.run.status)
@@ -194,6 +196,11 @@ export default function ProjectView({
 
   const runActive = !['idle', 'pushed', 'failed', 'cancelled'].includes(runStatus)
 
+  function selectTab(next: ProjectTab) {
+    setTab(next)
+    setView({ kind: 'project', projectId, tab: next })
+  }
+
   useEffect(() => {
     setTab(initialTab)
   }, [initialTab, projectId])
@@ -216,18 +223,18 @@ export default function ProjectView({
             <TabPill
               active={tab === 'features'}
               working={activeFeatureIds.length > 0}
-              onClick={() => setTab('features')}
+              onClick={() => selectTab('features')}
             >
               Features
             </TabPill>
             <TabPill
               active={tab === 'planning'}
               working={activePlanIds.length > 0}
-              onClick={() => setTab('planning')}
+              onClick={() => selectTab('planning')}
             >
               Planning
             </TabPill>
-            <TabPill active={tab === 'issues'} working={issueRunVisible} onClick={() => setTab('issues')}>
+            <TabPill active={tab === 'issues'} working={issueRunVisible} onClick={() => selectTab('issues')}>
               Issues
             </TabPill>
           </div>
@@ -263,7 +270,7 @@ export default function ProjectView({
 
         {tab === 'planning' && (
           <div className="flex-1 min-h-0 overflow-hidden">
-            <PlanningView projectId={projectId} repos={repos} />
+            <PlanningView projectId={projectId} repos={repos} initialPlanId={initialPlanId} />
           </div>
         )}
 

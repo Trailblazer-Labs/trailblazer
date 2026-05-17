@@ -297,8 +297,6 @@ npm run build        # makes sure both bundles assemble
 
 ## License
 
-<!-- TODO: pick a license -->
-
-To be added. MIT is the likely choice.
+Trailblazer is licensed under the GNU General Public License v3.0. See [LICENSE](LICENSE) for details.
 
 ---

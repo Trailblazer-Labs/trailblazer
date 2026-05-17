@@ -313,6 +313,7 @@ export async function rebranchFeatureRepo(args: {
   featureId: number
   repoId: number
   baseBranch: string
+  source?: 'base' | 'current'
   force?: boolean
 }): Promise<FeatureRepo> {
   const feature = getFeature(args.featureId)
@@ -335,16 +336,23 @@ export async function rebranchFeatureRepo(args: {
 
   const repoPath = await ensureRepoCloned(row.owner, row.name)
   const repoGit = simpleGit(repoPath)
-  await repoGit.fetch('origin', baseBranch).catch(() => {})
-  await repoGit.raw(['rev-parse', '--verify', `origin/${baseBranch}`]).catch(() => {
-    throw new Error(`Base branch origin/${baseBranch} was not found.`)
-  })
+  const source = args.source ?? 'base'
+  let startPoint = `origin/${baseBranch}`
+  if (source === 'current') {
+    const currentHead = await simpleGit(current.worktreePath).revparse(['HEAD'])
+    startPoint = currentHead.trim()
+  } else {
+    await repoGit.fetch('origin', baseBranch).catch(() => {})
+    await repoGit.raw(['rev-parse', '--verify', `origin/${baseBranch}`]).catch(() => {
+      throw new Error(`Base branch origin/${baseBranch} was not found.`)
+    })
+  }
 
   await removeFeatureWorktree(repoPath, current.worktreePath)
   fs.mkdirSync(path.dirname(current.worktreePath), { recursive: true })
 
   const branch = await nextAvailableFeatureBranch(repoPath, `feature/${feature.slug}`)
-  await repoGit.raw(['worktree', 'add', '-b', branch, current.worktreePath, `origin/${baseBranch}`])
+  await repoGit.raw(['worktree', 'add', '-b', branch, current.worktreePath, startPoint])
 
   getDb()
     .prepare(

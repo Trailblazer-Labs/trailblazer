@@ -846,6 +846,7 @@ export interface FeatureRepoChanges {
   hasUncommitted: boolean
   prNumber: number | null
   prUrl: string | null
+  prState?: 'open' | 'closed' | 'merged' | null
   files: Array<{
     path: string
     status: 'added' | 'modified' | 'deleted' | 'renamed'
@@ -873,6 +874,7 @@ export async function getFeatureChanges(
       const files: FeatureRepoChanges['files'] = []
       let commitsAhead = 0
       let hasUncommitted = false
+      let prState: FeatureRepoChanges['prState'] = null
 
       try {
         await git.fetch('origin', r.baseBranch).catch(() => {})
@@ -983,6 +985,15 @@ export async function getFeatureChanges(
         // best-effort
       }
 
+      if (r.prNumber) {
+        try {
+          const detail = await gh.getPullDetail(r.repoOwner, r.repoName, r.prNumber)
+          prState = detail.state
+        } catch {
+          prState = null
+        }
+      }
+
       return {
         repoId: r.repoId,
         repoName: r.repoName,
@@ -992,6 +1003,7 @@ export async function getFeatureChanges(
         hasUncommitted,
         prNumber: r.prNumber,
         prUrl: r.prUrl,
+        prState,
         files
       }
     })

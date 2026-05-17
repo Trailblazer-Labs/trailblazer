@@ -388,14 +388,14 @@ export default function FeatureChangesPanel({
                     )}
                     <span className="text-[10px] text-muted tabular-nums">{visible.length}</span>
                     {repo.prNumber && (
-                      <Pill tone="open">PR #{repo.prNumber}</Pill>
+                      <Pill tone={prTone(repo.prState)}>PR #{repo.prNumber}</Pill>
                     )}
                   </button>
                   <button
                     onClick={() => setRebranchRepo(repo)}
                     className="no-drag rounded border border-border bg-panel px-1.5 py-0.5 text-[10px] text-muted hover:text-text hover:bg-[#1d1d1d]"
                   >
-                    Continue
+                    New branch
                   </button>
                 </div>
                 {open && (
@@ -532,10 +532,15 @@ function RebranchRepoModal({
   onDone: () => void
 }) {
   const [baseBranch, setBaseBranch] = useState(repo.baseBranch)
+  const [source, setSource] = useState<'current' | 'base'>(
+    repo.prState === 'open' ? 'current' : 'base'
+  )
   const [branches, setBranches] = useState<string[]>([repo.baseBranch])
   const [discard, setDiscard] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const retiredPr = repo.prState === 'merged' || repo.prState === 'closed'
+  const openPr = repo.prState === 'open'
 
   useEffect(() => {
     let cancelled = false
@@ -562,6 +567,7 @@ function RebranchRepoModal({
         featureId,
         repoId: repo.repoId,
         baseBranch,
+        source,
         force: discard
       })
       onDone()
@@ -576,14 +582,66 @@ function RebranchRepoModal({
     <Modal onClose={busy ? () => {} : onClose}>
       <Card className="w-[460px] p-4">
         <div className="text-xs uppercase tracking-wider text-muted mb-1">
-          Continue repo from base
+          Start new repo branch
         </div>
         <h3 className="text-base mb-2">{repo.repoName}</h3>
         <p className="text-xs leading-5 text-muted mb-4">
           This removes this feature's current worktree checkout for the repo and creates a new
-          feature branch from the selected base. The old branch is left alone, and the old PR link
-          is cleared for this repo.
+          feature branch. The old branch is left alone, and the old PR link is cleared for this
+          repo.
         </p>
+        {openPr && (
+          <div className="mb-4 rounded-md border border-accent/35 bg-accent/10 px-3 py-2 text-xs leading-5 text-accent/95">
+            PR #{repo.prNumber} is still open. By default, Trailblazer will branch from the current
+            PR branch so the next branch includes the work still under review. You can start from{' '}
+            <span className="font-mono">{baseBranch}</span> instead if you want a clean branch.
+          </div>
+        )}
+        {retiredPr && (
+          <div
+            className={cn(
+              'mb-4 rounded-md border px-3 py-2 text-xs leading-5',
+              repo.prState === 'merged'
+                ? 'border-purple-400/35 bg-purple-400/10 text-purple-100'
+                : 'border-red-400/35 bg-red-400/10 text-red-100'
+            )}
+          >
+            PR #{repo.prNumber} is {repo.prState}. Starting a new branch will continue this repo
+            from <span className="font-mono">{baseBranch}</span> and detach it from the old PR.
+          </div>
+        )}
+        {openPr && (
+          <div className="mb-3 grid grid-cols-2 gap-2">
+            <button
+              type="button"
+              onClick={() => setSource('current')}
+              disabled={busy}
+              className={cn(
+                'no-drag rounded-md border px-3 py-2 text-left text-xs transition-colors',
+                source === 'current'
+                  ? 'border-accent/50 bg-[#1a1414] text-text'
+                  : 'border-border bg-panel text-muted hover:text-text hover:bg-[#1d1d1d]'
+              )}
+            >
+              <div className="font-medium">From current PR</div>
+              <div className="mt-1 text-[10px] text-muted">Includes {repo.branch}</div>
+            </button>
+            <button
+              type="button"
+              onClick={() => setSource('base')}
+              disabled={busy}
+              className={cn(
+                'no-drag rounded-md border px-3 py-2 text-left text-xs transition-colors',
+                source === 'base'
+                  ? 'border-accent/50 bg-[#1a1414] text-text'
+                  : 'border-border bg-panel text-muted hover:text-text hover:bg-[#1d1d1d]'
+              )}
+            >
+              <div className="font-medium">From base</div>
+              <div className="mt-1 text-[10px] text-muted">Starts at {baseBranch}</div>
+            </button>
+          </div>
+        )}
         <label className="block mb-3">
           <div className="mb-1 text-[10px] uppercase tracking-wider text-muted">Base branch</div>
           <select
@@ -600,7 +658,10 @@ function RebranchRepoModal({
           </select>
         </label>
         <div className="rounded-md border border-border bg-bg px-3 py-2 text-[11px] leading-5 text-muted">
-          Current branch: <span className="font-mono text-text/80">{repo.branch}</span>
+          Starting point:{' '}
+          <span className="font-mono text-text/80">
+            {source === 'current' ? repo.branch : `origin/${baseBranch}`}
+          </span>
           <br />
           New branch: <span className="font-mono text-text/80">next available feature branch</span>
         </div>
@@ -629,7 +690,7 @@ function RebranchRepoModal({
             onClick={rebranch}
             disabled={busy || !baseBranch.trim() || (repo.hasUncommitted && !discard)}
           >
-            {busy ? 'Continuing...' : 'Continue from base'}
+            {busy ? 'Starting...' : 'Start new branch'}
           </Button>
         </div>
       </Card>
@@ -656,6 +717,10 @@ function DevConsole({
   const [running, setRunning] = useState(false)
   const [logs, setLogs] = useState('')
   const [error, setError] = useState<string | null>(null)
+  const [collapsed, setCollapsed] = useState(() => {
+    if (typeof window === 'undefined') return false
+    return window.localStorage.getItem(`feature-dev-console-collapsed:${featureId}`) === '1'
+  })
   const [selectedProfileId, setSelectedProfileId] = useState<number | null>(profiles[0]?.id ?? null)
   const logRef = useRef<HTMLPreElement>(null)
   const selectedProfile = profiles.find((profile) => profile.id === selectedProfileId) ?? null
@@ -684,6 +749,10 @@ function DevConsole({
   useEffect(() => {
     window.localStorage.setItem(storageKey, command)
   }, [command, storageKey])
+
+  useEffect(() => {
+    window.localStorage.setItem(`feature-dev-console-collapsed:${featureId}`, collapsed ? '1' : '0')
+  }, [collapsed, featureId])
 
   useEffect(() => {
     const unsub = window.api.features.onDevEvent((evt: FeatureDevCommandEvent) => {
@@ -756,14 +825,41 @@ function DevConsole({
   }
 
   return (
-    <section className="border-t border-border/80 px-3 py-3 space-y-2">
+    <section className={cn('border-t border-border/80 px-3', collapsed ? 'py-2' : 'py-3 space-y-2')}>
       <div className="flex items-center justify-between gap-2">
-        <div>
-          <div className="text-[10px] uppercase tracking-wider text-muted">Dev console</div>
-          <div className="text-[11px] text-muted">Run a long-lived command in a feature worktree.</div>
+        <button
+          type="button"
+          onClick={() => setCollapsed((value) => !value)}
+          className="no-drag min-w-0 flex flex-1 items-center gap-2 text-left"
+        >
+          <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded border border-border bg-panel text-xs text-muted">
+            {collapsed ? '+' : '−'}
+          </span>
+          <div className="min-w-0">
+            <div className="text-[10px] uppercase tracking-wider text-muted">Dev console</div>
+            <div className="truncate text-[11px] text-muted">
+              {collapsed
+                ? running
+                  ? 'Running command'
+                  : command.trim() || 'Run a long-lived command in a feature worktree.'
+                : 'Run a long-lived command in a feature worktree.'}
+            </div>
+          </div>
+        </button>
+        <div className="flex items-center gap-2">
+          {running && <span className="tb-pulse h-2 w-2 rounded-full bg-amber-300" />}
+          {collapsed && running && (
+            <button
+              onClick={stop}
+              className="no-drag h-6 px-2 rounded border border-red-900/70 bg-red-950/30 text-[10px] text-red-200 hover:bg-red-950/50"
+            >
+              Stop
+            </button>
+          )}
         </div>
-        {running && <span className="tb-pulse h-2 w-2 rounded-full bg-amber-300" />}
       </div>
+      {!collapsed && (
+        <>
       {profiles.length > 0 && (
         <div className="rounded-md border border-border bg-panel/50 p-2 space-y-2">
           <select
@@ -889,6 +985,8 @@ function DevConsole({
       >
         {logs || 'Console output will appear here.'}
       </pre>
+        </>
+      )}
     </section>
   )
 }
@@ -907,6 +1005,12 @@ function resultLabel(r: FeatureCommitResult): string {
   if (r.status === 'pulled') return 'pulled latest'
   if (r.status === 'clean') return 'nothing to do'
   return `failed - ${r.error}`
+}
+
+function prTone(state: FeatureRepoChanges['prState']): 'open' | 'merged' | 'closed' {
+  if (state === 'merged') return 'merged'
+  if (state === 'closed') return 'closed'
+  return 'open'
 }
 
 function FileStatusGlyph({

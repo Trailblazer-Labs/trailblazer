@@ -1,6 +1,8 @@
-import { useEffect, useRef, useState } from 'react'
+import { type MouseEvent, useEffect, useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { Clipboard } from 'lucide-react'
 import { cn } from '../lib/cn'
+import { buildResumeCommand } from '../lib/resumeCommand'
 import { useApp } from '../stores/app'
 import NewFeatureModal from './NewFeatureModal'
 import type { Feature, FeatureSession, Repo } from '@shared/types'
@@ -270,6 +272,7 @@ function FeatureNode({
             sessions.map((s) => (
               <SessionNode
                 key={s.id}
+                feature={feature}
                 session={s}
                 active={s.id === currentSessionId}
                 onOpen={() => onOpenSession(s.id)}
@@ -292,11 +295,13 @@ function FeatureNode({
 }
 
 function SessionNode({
+  feature,
   session,
   active,
   onOpen,
   onAfterMutate
 }: {
+  feature: Feature
   session: FeatureSession
   active: boolean
   onOpen: () => void
@@ -322,6 +327,11 @@ function SessionNode({
     if (!confirm(`Delete session "${session.name}"? Its messages will be lost.`)) return
     await window.api.features.deleteSession(session.id)
     onAfterMutate()
+  }
+
+  async function copyResume(e: MouseEvent<HTMLButtonElement>) {
+    e.stopPropagation()
+    await navigator.clipboard.writeText(buildResumeCommand({ feature, session }))
   }
 
   return (
@@ -360,16 +370,33 @@ function SessionNode({
         </button>
       )}
       {!editing && (
-        <button
-          onClick={(e) => {
-            e.stopPropagation()
-            void remove()
-          }}
-          className="ml-1 text-muted/70 hover:text-red-400 opacity-0 group-hover:opacity-100 text-[10px]"
-          title="Delete session"
-        >
-          ✕
-        </button>
+        <>
+          <button
+            onClick={(e) => void copyResume(e)}
+            className="relative ml-1 text-muted/70 hover:text-text opacity-0 group-hover:opacity-100"
+            title={
+              session.cliSessionId
+                ? 'Copy terminal resume command'
+                : 'Copy terminal command for this feature workspace'
+            }
+            aria-label="Copy terminal resume command"
+          >
+            <Clipboard size={11} />
+            <span className="pointer-events-none absolute right-0 top-5 z-20 hidden w-max max-w-[220px] rounded-md border border-border bg-[#191919] px-2 py-1 text-[10px] leading-4 text-text shadow-xl group-hover:block">
+              {session.cliSessionId ? 'Copy resume command' : 'Copy terminal command'}
+            </span>
+          </button>
+          <button
+            onClick={(e) => {
+              e.stopPropagation()
+              void remove()
+            }}
+            className="ml-1 text-muted/70 hover:text-red-400 opacity-0 group-hover:opacity-100 text-[10px]"
+            title="Delete session"
+          >
+            ✕
+          </button>
+        </>
       )}
     </div>
   )

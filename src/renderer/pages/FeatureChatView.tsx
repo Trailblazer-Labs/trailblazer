@@ -9,7 +9,8 @@ import PRResultsModal from '../components/PRResultsModal'
 import FeatureSwitcher, { useFeatureSwitcherCollapsed } from '../components/FeatureSwitcher'
 import FeatureChangesPanel from '../components/FeatureChangesPanel'
 import { cn } from '../lib/cn'
-import { Paperclip, X } from 'lucide-react'
+import { buildResumeCommand } from '../lib/resumeCommand'
+import { Clipboard, Paperclip, X } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { defaultModelFor, mergedModels } from '@shared/models'
@@ -103,6 +104,7 @@ export default function FeatureChatView({
     sessionId && sessions.some((s) => s.id === sessionId)
       ? sessionId
       : sessions[0]?.id
+  const currentSession = sessions.find((s) => s.id === resolvedSessionId) ?? null
 
 
   const { data: messages = [] } = useQuery<FeatureMessage[]>({
@@ -267,6 +269,17 @@ export default function FeatureChatView({
     }
   }
 
+  async function copyResumeCommand() {
+    if (!feature) return
+    await navigator.clipboard.writeText(
+      buildResumeCommand({
+        feature,
+        session: currentSession,
+        engine
+      })
+    )
+  }
+
   const [switcherCollapsed, setSwitcherCollapsed] = useFeatureSwitcherCollapsed()
   void perRepoSummary
 
@@ -284,6 +297,18 @@ export default function FeatureChatView({
     if (!engine) return
     setModelState(project?.featureModel || defaultModelFor(engine))
   }, [engine, project?.featureModel])
+
+  async function setFeatureModel(next: string) {
+    setModelState(next)
+    if (!project) return
+    try {
+      await window.api.projects.updateSettings(project.id, { featureModel: next })
+      void qc.invalidateQueries({ queryKey: ['project', projectId] })
+      void qc.invalidateQueries({ queryKey: ['projects'] })
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'failed to save model choice')
+    }
+  }
 
   return (
     <div className="h-full flex overflow-hidden">
@@ -312,11 +337,11 @@ export default function FeatureChatView({
                 feature/{feature.slug}
               </span>
             )}
-            {sessions.find((s) => s.id === resolvedSessionId) && (
+            {currentSession && (
               <>
                 <span className="text-muted/40 shrink-0">·</span>
                 <span className="text-xs text-muted truncate">
-                  {sessions.find((s) => s.id === resolvedSessionId)?.name}
+                  {currentSession.name}
                 </span>
               </>
             )}
@@ -332,6 +357,24 @@ export default function FeatureChatView({
             />
           </div>
           <div className="flex flex-1 items-center justify-end gap-2">
+            <button
+              onClick={() => void copyResumeCommand()}
+              disabled={!feature}
+              title={
+                currentSession?.cliSessionId
+                  ? 'Copy terminal resume command'
+                  : 'Copy terminal command for this feature workspace'
+              }
+              aria-label="Copy terminal resume command"
+              className="group relative no-drag h-8 w-8 rounded-md border border-border bg-panel text-muted hover:text-text hover:bg-[#1d1d1d] disabled:opacity-50 flex items-center justify-center"
+            >
+              <Clipboard size={14} />
+              <span className="pointer-events-none absolute right-0 top-10 z-20 hidden w-max max-w-[240px] rounded-md border border-border bg-[#191919] px-2 py-1 text-[10px] leading-4 text-text shadow-xl group-hover:block">
+                {currentSession?.cliSessionId
+                  ? 'Copy terminal resume command'
+                  : 'Copy terminal command'}
+              </span>
+            </button>
             <Button
               onClick={async () => {
                 const s = await window.api.features.createSession(featureId)
@@ -466,7 +509,7 @@ export default function FeatureChatView({
                       engine={engine}
                       value={model}
                       disabled={agentRunning}
-                      onChange={(v) => setModelState(v)}
+                      onChange={(v) => void setFeatureModel(v)}
                     />
                   )}
                   <input
