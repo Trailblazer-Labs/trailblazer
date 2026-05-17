@@ -290,6 +290,7 @@ const api = {
       featureId: number
       repoId: number
       baseBranch: string
+      source?: 'base' | 'current'
       force?: boolean
     }): Promise<FeatureRepo> => ipcRenderer.invoke(IPC.featuresRebranchRepo, args),
     runDevCommand: (args: {

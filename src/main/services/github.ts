@@ -151,7 +151,14 @@ export async function listPulls(
   return { items, hasMore: res.data.length === PER_PAGE }
 }
 
-export async function getPullDetail(owner: string, repo: string, number: number) {
+export async function getPullDetail(owner: string, repo: string, number: number): Promise<{
+  number: number
+  title: string
+  body: string
+  state: 'open' | 'closed' | 'merged'
+  mergeable: boolean | null
+  files: DiffFile[]
+}> {
   const [pr, files] = await Promise.all([
     octokit().pulls.get({ owner, repo, pull_number: number }),
     octokit().pulls.listFiles({ owner, repo, pull_number: number, per_page: 300 })

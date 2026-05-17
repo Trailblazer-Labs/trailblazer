@@ -41,7 +41,15 @@ const CHAT_MIN_WIDTH = 280
 const CHAT_MAX_WIDTH = 720
 const CHAT_DEFAULT_WIDTH = 360
 
-export default function PlanningView({ projectId, repos }: { projectId: number; repos: Repo[] }) {
+export default function PlanningView({
+  projectId,
+  repos,
+  initialPlanId
+}: {
+  projectId: number
+  repos: Repo[]
+  initialPlanId?: number
+}) {
   const qc = useQueryClient()
   const setView = useApp((s) => s.setView)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -58,7 +66,7 @@ export default function PlanningView({ projectId, repos }: { projectId: number; 
     if (typeof window === 'undefined') return false
     return window.localStorage.getItem('planning.agentShelved') === 'true'
   })
-  const [activePlanId, setActivePlanId] = useState<number | null>(null)
+  const [activePlanId, setActivePlanId] = useState<number | null>(initialPlanId ?? null)
   const [title, setTitle] = useState('')
   const [content, setContent] = useState('')
   const [documentMode, setDocumentMode] = useState<'edit' | 'preview'>('edit')
@@ -106,9 +114,17 @@ export default function PlanningView({ projectId, repos }: { projectId: number; 
       return
     }
     if (activePlanId === null || !plans.some((plan) => plan.id === activePlanId)) {
-      setActivePlanId(plans[0].id)
+      const restored = initialPlanId
+        ? plans.find((plan) => plan.id === initialPlanId)?.id
+        : undefined
+      setActivePlanId(restored ?? plans[0].id)
     }
-  }, [activePlanId, plans])
+  }, [activePlanId, initialPlanId, plans])
+
+  useEffect(() => {
+    if (activePlanId === null) return
+    setView({ kind: 'project', projectId, tab: 'planning', planId: activePlanId })
+  }, [activePlanId, projectId, setView])
 
   useEffect(() => {
     if (!activePlan) {

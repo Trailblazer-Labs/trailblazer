@@ -204,6 +204,7 @@ export interface FeatureRepoChanges {
   hasUncommitted: boolean
   prNumber: number | null
   prUrl: string | null
+  prState?: 'open' | 'closed' | 'merged' | null
   files: FeatureChangedFile[]
 }
 

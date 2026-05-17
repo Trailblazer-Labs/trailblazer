@@ -456,6 +456,7 @@ export function registerIpc(win: BrowserWindow) {
         featureId: number
         repoId: number
         baseBranch: string
+        source?: 'base' | 'current'
         force?: boolean
       }
     ) => features.rebranchFeatureRepo(args)
