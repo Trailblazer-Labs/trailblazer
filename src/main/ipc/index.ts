@@ -447,6 +447,21 @@ export function registerIpc(win: BrowserWindow) {
       }
     ) => features.importFeature(args)
   )
+  ipcMain.handle(
+    IPC.featuresAddRepos,
+    (
+      _e,
+      args: {
+        featureId: number
+        repos: Array<{
+          repoId: number
+          existingBranch?: string
+          newBranch?: string
+          baseBranch?: string
+        }>
+      }
+    ) => features.addReposToFeature(args)
+  )
   ipcMain.handle(IPC.featuresDelete, (_e, featureId: number) => features.deleteFeature(featureId))
   ipcMain.handle(
     IPC.featuresRebranchRepo,

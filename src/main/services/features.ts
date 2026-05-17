@@ -309,6 +309,62 @@ export async function importFeature(opts: {
   return { feature, featureRepos }
 }
 
+export async function addReposToFeature(opts: {
+  featureId: number
+  repos: Array<{
+    repoId: number
+    existingBranch?: string
+    newBranch?: string
+    baseBranch?: string
+  }>
+}): Promise<{ feature: Feature; featureRepos: FeatureRepo[] }> {
+  const feature = getFeature(opts.featureId)
+  if (!feature) throw new Error('Feature not found')
+  if (opts.repos.length === 0) throw new Error('Pick at least one repo')
+
+  const existingIds = new Set(listFeatureRepos(opts.featureId).map((repo) => repo.repoId))
+  const repoIds = opts.repos.map((r) => r.repoId)
+  const db = getDb()
+  const repoRows = db
+    .prepare(
+      `SELECT id, owner, name, default_branch, local_path, COALESCE(working_branch, default_branch) AS working_branch
+         FROM repos WHERE id IN (${repoIds.map(() => '?').join(',')})`
+    )
+    .all(...repoIds) as {
+    id: number
+    owner: string
+    name: string
+    default_branch: string
+    local_path: string
+    working_branch: string
+  }[]
+  const byId = new Map(repoRows.map((r) => [r.id, r]))
+
+  for (const sel of opts.repos) {
+    if (existingIds.has(sel.repoId)) throw new Error('Repo is already in this feature')
+    const repo = byId.get(sel.repoId)
+    if (!repo) continue
+    const repoPath = await ensureRepoCloned(repo.owner, repo.name)
+    const baseBranch = sel.baseBranch || repo.working_branch
+    const branch = sel.newBranch ?? sel.existingBranch
+    if (!branch) throw new Error(`Missing branch selection for ${repo.name}`)
+    const worktreePath = path.join(feature.workspacePath, repo.name)
+    if (sel.existingBranch) {
+      await attachWorktreeToExisting(repoPath, worktreePath, branch)
+    } else {
+      await createOrAttachWorktree(repoPath, worktreePath, branch, baseBranch)
+    }
+    db.prepare(
+      `INSERT INTO feature_repos(feature_id, repo_id, branch, base_branch, worktree_path)
+       VALUES(?,?,?,?,?)`
+    ).run(opts.featureId, repo.id, branch, baseBranch, worktreePath)
+    const head = (await simpleGit(worktreePath).revparse(['HEAD'])).trim()
+    resetSessionBaselinesForRepo(opts.featureId, repo.id, head)
+  }
+
+  return { feature: getFeature(opts.featureId)!, featureRepos: listFeatureRepos(opts.featureId) }
+}
+
 export async function rebranchFeatureRepo(args: {
   featureId: number
   repoId: number

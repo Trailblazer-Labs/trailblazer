@@ -62,6 +62,7 @@ export const IPC = {
   featuresGet: 'features:get',
   featuresCreate: 'features:create',
   featuresImport: 'features:import',
+  featuresAddRepos: 'features:add-repos',
   featuresDelete: 'features:delete',
   featuresListActive: 'features:list-active',
   featuresListRepos: 'features:list-repos',

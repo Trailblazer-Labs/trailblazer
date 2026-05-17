@@ -240,6 +240,16 @@ const api = {
       }>
     }): Promise<{ feature: Feature; featureRepos: FeatureRepo[] }> =>
       ipcRenderer.invoke(IPC.featuresImport, args),
+    addRepos: (args: {
+      featureId: number
+      repos: Array<{
+        repoId: number
+        existingBranch?: string
+        newBranch?: string
+        baseBranch?: string
+      }>
+    }): Promise<{ feature: Feature; featureRepos: FeatureRepo[] }> =>
+      ipcRenderer.invoke(IPC.featuresAddRepos, args),
     delete: (featureId: number): Promise<void> => ipcRenderer.invoke(IPC.featuresDelete, featureId),
     listMessages: (sessionId: number): Promise<FeatureMessage[]> =>
       ipcRenderer.invoke(IPC.featuresListMessages, sessionId),

@@ -8,9 +8,10 @@ import { filesFromClipboard, filesFromDrop, filesToPromptAttachments } from '../
 import PRResultsModal from '../components/PRResultsModal'
 import FeatureSwitcher, { useFeatureSwitcherCollapsed } from '../components/FeatureSwitcher'
 import FeatureChangesPanel from '../components/FeatureChangesPanel'
+import NewFeatureModal from '../components/NewFeatureModal'
 import { cn } from '../lib/cn'
 import { buildResumeCommand } from '../lib/resumeCommand'
-import { Clipboard, Paperclip, X } from 'lucide-react'
+import { Clipboard, MoreHorizontal, Paperclip, X } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { defaultModelFor, mergedModels } from '@shared/models'
@@ -82,6 +83,8 @@ export default function FeatureChatView({
   const [error, setError] = useState<string | null>(null)
   const [prResults, setPrResults] = useState<PRCreateResult[] | null>(null)
   const [creatingPRs, setCreatingPRs] = useState(false)
+  const [addingRepos, setAddingRepos] = useState(false)
+  const [featureMenuOpen, setFeatureMenuOpen] = useState(false)
 
   useEffect(() => {
     if (initialDraft) setDraft(initialDraft)
@@ -269,6 +272,17 @@ export default function FeatureChatView({
     }
   }
 
+  useEffect(() => {
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key.toLowerCase() !== 'r' || (!event.metaKey && !event.ctrlKey)) return
+      event.preventDefault()
+      if (creatingPRs) return
+      void createPRs()
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [creatingPRs])
+
   async function copyResumeCommand() {
     if (!feature) return
     await navigator.clipboard.writeText(
@@ -375,17 +389,42 @@ export default function FeatureChatView({
                   : 'Copy terminal command'}
               </span>
             </button>
-            <Button
-              onClick={async () => {
-                const s = await window.api.features.createSession(featureId)
-                void qc.invalidateQueries({ queryKey: ['feature-sessions', featureId] })
-                setView({ kind: 'feature', projectId, featureId, sessionId: s.id })
-              }}
-            >
-              + New session
-            </Button>
+            <div className="relative">
+              <button
+                onClick={() => setFeatureMenuOpen((open) => !open)}
+                title="Feature actions"
+                aria-label="Feature actions"
+                className="no-drag h-8 w-8 rounded-md border border-border bg-panel text-muted hover:text-text hover:bg-[#1d1d1d] flex items-center justify-center"
+              >
+                <MoreHorizontal size={15} />
+              </button>
+              {featureMenuOpen && (
+                <div className="absolute right-0 top-9 z-30 w-44 rounded-md border border-border bg-[#171717] p-1 shadow-xl">
+                  <button
+                    onClick={async () => {
+                      setFeatureMenuOpen(false)
+                      const s = await window.api.features.createSession(featureId)
+                      void qc.invalidateQueries({ queryKey: ['feature-sessions', featureId] })
+                      setView({ kind: 'feature', projectId, featureId, sessionId: s.id })
+                    }}
+                    className="no-drag w-full rounded px-2 py-1.5 text-left text-xs text-muted hover:bg-panel hover:text-text"
+                  >
+                    New session
+                  </button>
+                  <button
+                    onClick={() => {
+                      setFeatureMenuOpen(false)
+                      setAddingRepos(true)
+                    }}
+                    className="no-drag w-full rounded px-2 py-1.5 text-left text-xs text-muted hover:bg-panel hover:text-text"
+                  >
+                    Add repositories
+                  </button>
+                </div>
+              )}
+            </div>
             <Button variant="primary" disabled={creatingPRs} onClick={createPRs}>
-              {creatingPRs ? 'Opening PRs…' : 'Create PRs'}
+              {creatingPRs ? 'Opening PRs...' : 'Create PRs'}
             </Button>
           </div>
         </header>
@@ -559,6 +598,21 @@ export default function FeatureChatView({
       </div>
 
       {prResults && <PRResultsModal results={prResults} onClose={() => setPrResults(null)} />}
+      {addingRepos && feature && (
+        <NewFeatureModal
+          projectId={projectId}
+          repos={projectRepos}
+          feature={feature}
+          existingRepoIds={featureRepos.map((repo) => repo.repoId)}
+          onClose={() => setAddingRepos(false)}
+          onCreated={() => {
+            setAddingRepos(false)
+            void qc.invalidateQueries({ queryKey: ['feature-repos', featureId] })
+            void qc.invalidateQueries({ queryKey: ['feature-changes', featureId] })
+            void qc.invalidateQueries({ queryKey: ['features', projectId] })
+          }}
+        />
+      )}
     </div>
   )
 }

@@ -9,16 +9,20 @@ type Mode = 'create' | 'import'
 export default function NewFeatureModal({
   projectId,
   repos,
+  feature,
+  existingRepoIds = [],
   onClose,
   onCreated
 }: {
   projectId: number
   repos: Repo[]
+  feature?: Feature
+  existingRepoIds?: number[]
   onClose: () => void
   onCreated: (f: Feature) => void
 }) {
   const [mode, setMode] = useState<Mode>('create')
-  const [name, setName] = useState('')
+  const [name, setName] = useState(feature?.name ?? '')
   const [selectedIds, setSelectedIds] = useState<number[]>([])
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -29,7 +33,12 @@ export default function NewFeatureModal({
   >({})
   const [createBaseBranches, setCreateBaseBranches] = useState<Record<number, string>>({})
 
-  const slug = useMemo(() => slugify(name), [name])
+  const addingToFeature = !!feature
+  const availableRepos = useMemo(
+    () => repos.filter((repo) => !existingRepoIds.includes(repo.id)),
+    [existingRepoIds, repos]
+  )
+  const slug = useMemo(() => feature?.slug ?? slugify(name), [feature?.slug, name])
 
   function toggleRepo(id: number) {
     setSelectedIds((prev) =>
@@ -38,7 +47,7 @@ export default function NewFeatureModal({
   }
 
   async function submit() {
-    if (!name.trim()) {
+    if (!addingToFeature && !name.trim()) {
       setError('Name is required')
       return
     }
@@ -55,13 +64,25 @@ export default function NewFeatureModal({
           if (branch) acc[repoId] = branch
           return acc
         }, {})
-        const { feature } = await window.api.features.create({
-          projectId,
-          name: name.trim(),
-          repoIds: selectedIds,
-          baseBranches
-        })
-        onCreated(feature)
+        if (addingToFeature && feature) {
+          const { feature: updated } = await window.api.features.addRepos({
+            featureId: feature.id,
+            repos: selectedIds.map((repoId) => ({
+              repoId,
+              newBranch: `feature/${feature.slug}`,
+              baseBranch: baseBranches[repoId]
+            }))
+          })
+          onCreated(updated)
+        } else {
+          const { feature } = await window.api.features.create({
+            projectId,
+            name: name.trim(),
+            repoIds: selectedIds,
+            baseBranches
+          })
+          onCreated(feature)
+        }
       } else {
         const repos = selectedIds.map((repoId) => {
           const sel = importSelections[repoId]
@@ -70,12 +91,20 @@ export default function NewFeatureModal({
             ? { repoId, existingBranch: sel.value, baseBranch: sel.baseBranch }
             : { repoId, newBranch: sel.value, baseBranch: sel.baseBranch }
         })
-        const { feature } = await window.api.features.import({
-          projectId,
-          name: name.trim(),
-          repos
-        })
-        onCreated(feature)
+        if (addingToFeature && feature) {
+          const { feature: updated } = await window.api.features.addRepos({
+            featureId: feature.id,
+            repos
+          })
+          onCreated(updated)
+        } else {
+          const { feature } = await window.api.features.import({
+            projectId,
+            name: name.trim(),
+            repos
+          })
+          onCreated(feature)
+        }
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'failed')
@@ -87,8 +116,12 @@ export default function NewFeatureModal({
   return (
     <Modal onClose={onClose}>
       <Card className="w-[720px] max-h-[85vh] flex flex-col p-6">
-        <div className="text-sm text-muted mb-1">New feature</div>
-        <h2 className="font-brand text-xl mb-4">Spin up branches across your repos</h2>
+        <div className="text-sm text-muted mb-1">
+          {addingToFeature ? 'Add repositories' : 'New feature'}
+        </div>
+        <h2 className="font-brand text-xl mb-4">
+          {addingToFeature ? `Add repos to ${feature?.name}` : 'Spin up branches across your repos'}
+        </h2>
 
         <div className="inline-flex p-1 rounded-md bg-bg border border-border mb-5 w-fit">
           <ModeTab active={mode === 'create'} onClick={() => setMode('create')}>
@@ -100,12 +133,14 @@ export default function NewFeatureModal({
         </div>
 
         <div className="space-y-3 mb-4">
-          <Input
-            placeholder="Feature name (e.g. dark-mode)"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            autoFocus
-          />
+          {!addingToFeature && (
+            <Input
+              placeholder="Feature name (e.g. dark-mode)"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              autoFocus
+            />
+          )}
           {mode === 'create' && name.trim() && (
             <div className="text-[11px] text-muted">
               Will create branch <code className="text-accent">feature/{slug}</code> in each selected
@@ -116,10 +151,10 @@ export default function NewFeatureModal({
 
         <div className="text-xs uppercase tracking-wider text-muted mb-2">Repositories</div>
         <div className="flex-1 overflow-auto rounded-md border border-border bg-bg">
-          {repos.length === 0 && (
+          {availableRepos.length === 0 && (
             <div className="px-3 py-4 text-xs text-muted">No repositories in this project.</div>
           )}
-          {repos.map((r) => {
+          {availableRepos.map((r) => {
             const active = selectedIds.includes(r.id)
             return (
               <div key={r.id} className="border-b border-border/60 last:border-b-0">
@@ -177,7 +212,13 @@ export default function NewFeatureModal({
             Cancel
           </Button>
           <Button variant="primary" onClick={submit} disabled={busy}>
-            {busy ? 'Working…' : mode === 'create' ? 'Create feature' : 'Import feature'}
+            {busy
+              ? 'Working…'
+              : addingToFeature
+                ? 'Add repos'
+                : mode === 'create'
+                  ? 'Create feature'
+                  : 'Import feature'}
           </Button>
         </div>
       </Card>
