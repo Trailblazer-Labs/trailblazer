@@ -28,7 +28,8 @@ import type {
   Engine,
   FeatureMessage,
   FeatureRepo,
-  PlanPromptAttachment
+  PlanPromptAttachment,
+  PRPreviewRepo
 } from '@shared/types'
 
 export type FeatureRunEvent =
@@ -559,10 +560,13 @@ export async function commitAndPublishFeatureChanges(
   return out
 }
 
-export async function publishFeatureBranches(featureId: number): Promise<FeatureCommitResult[]> {
+export async function publishFeatureBranches(
+  featureId: number,
+  repoId?: number
+): Promise<FeatureCommitResult[]> {
   const feature = getFeature(featureId)
   if (!feature) throw new Error('feature not found')
-  const repos = listFeatureRepos(featureId)
+  const repos = targetFeatureRepos(featureId, repoId)
   const out: FeatureCommitResult[] = []
   for (const r of repos) {
     try {
@@ -597,10 +601,13 @@ function targetFeatureRepos(featureId: number, repoId?: number): FeatureRepo[] {
   return [repo]
 }
 
-export async function pullFeatureBranches(featureId: number): Promise<FeatureCommitResult[]> {
+export async function pullFeatureBranches(
+  featureId: number,
+  repoId?: number
+): Promise<FeatureCommitResult[]> {
   const feature = getFeature(featureId)
   if (!feature) throw new Error('feature not found')
-  const repos = listFeatureRepos(featureId)
+  const repos = targetFeatureRepos(featureId, repoId)
   const out: FeatureCommitResult[] = []
   for (const r of repos) {
     try {
@@ -619,7 +626,69 @@ export async function pullFeatureBranches(featureId: number): Promise<FeatureCom
   return out
 }
 
-export async function createPRs(featureId: number): Promise<
+export async function previewPRs(featureId: number): Promise<PRPreviewRepo[]> {
+  const feature = getFeature(featureId)
+  if (!feature) throw new Error('feature not found')
+  const repos = listFeatureRepos(featureId)
+
+  return Promise.all(
+    repos.map(async (r) => {
+      const git = simpleGit(r.worktreePath)
+      let commitsAhead = 0
+      let filesChanged = 0
+      let hasUncommitted = false
+      let reason: string | undefined
+      let existingPrNumber: number | undefined = r.prNumber ?? undefined
+      let existingPrUrl: string | undefined = r.prUrl ?? undefined
+
+      try {
+        await git.fetch('origin', r.baseBranch).catch(() => {})
+        const rev = await git.raw(['rev-list', '--count', `origin/${r.baseBranch}..HEAD`])
+        commitsAhead = parseInt(rev.trim(), 10) || 0
+
+        const summary = await git.diffSummary([`origin/${r.baseBranch}...HEAD`]).catch(() => null)
+        const status = await git.status()
+        hasUncommitted = !status.isClean()
+        const paths = new Set<string>()
+        for (const f of summary?.files ?? []) paths.add(f.file)
+        for (const f of status.files) paths.add(f.path)
+        filesChanged = paths.size
+
+        if (!existingPrNumber) {
+          const owner = await getOwnerFromRepoId(r.repoId)
+          const existing = await octokitListPR(owner, r.repoName, r.branch)
+          if (existing) {
+            existingPrNumber = existing.number
+            existingPrUrl = existing.url
+          }
+        }
+      } catch (e) {
+        reason = e instanceof Error ? e.message : String(e)
+      }
+
+      if (!reason && existingPrNumber) reason = `existing PR #${existingPrNumber}`
+      if (!reason && commitsAhead === 0 && !hasUncommitted) {
+        reason = `no commits ahead of origin/${r.baseBranch}`
+      }
+
+      return {
+        repoId: r.repoId,
+        repoName: r.repoName,
+        branch: r.branch,
+        baseBranch: r.baseBranch,
+        commitsAhead,
+        filesChanged,
+        hasUncommitted,
+        eligible: !reason,
+        reason,
+        existingPrNumber,
+        existingPrUrl
+      }
+    })
+  )
+}
+
+export async function createPRs(featureId: number, repoIds?: number[]): Promise<
   Array<{
     repoId: number
     repoName: string
@@ -651,7 +720,9 @@ export async function createPRs(featureId: number): Promise<
   // eslint-disable-next-line no-console
   console.log('[create-prs] token scopes:', tokenScopes.join(', ') || '(none)')
 
-  const repos = listFeatureRepos(featureId)
+  const repos = repoIds
+    ? listFeatureRepos(featureId).filter((r) => repoIds.includes(r.repoId))
+    : listFeatureRepos(featureId)
   const results: Array<{
     repoId: number
     repoName: string

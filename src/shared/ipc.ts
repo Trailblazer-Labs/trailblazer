@@ -70,6 +70,7 @@ export const IPC = {
   featuresSendPrompt: 'features:send-prompt',
   featuresCancelTurn: 'features:cancel-turn',
   featuresEvent: 'features:event',
+  featuresPreviewPRs: 'features:preview-prs',
   featuresCreatePRs: 'features:create-prs',
   featuresGetChanges: 'features:get-changes',
   featuresCommit: 'features:commit',

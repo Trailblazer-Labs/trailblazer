@@ -25,6 +25,7 @@ import type {
   PlanPromptAttachment,
   PlanRunEvent,
   PRCreateResult,
+  PRPreviewRepo,
   Project,
   Repo,
   RepoSearchResult,
@@ -263,8 +264,10 @@ const api = {
       ipcRenderer.invoke(IPC.featuresTouchSession, sessionId),
     cancelTurn: (featureId: number): Promise<void> =>
       ipcRenderer.invoke(IPC.featuresCancelTurn, featureId),
-    createPRs: (featureId: number): Promise<PRCreateResult[]> =>
-      ipcRenderer.invoke(IPC.featuresCreatePRs, featureId),
+    previewPRs: (featureId: number): Promise<PRPreviewRepo[]> =>
+      ipcRenderer.invoke(IPC.featuresPreviewPRs, featureId),
+    createPRs: (featureId: number, repoIds?: number[]): Promise<PRCreateResult[]> =>
+      ipcRenderer.invoke(IPC.featuresCreatePRs, { featureId, repoIds }),
     getChanges: (
       args:
         | number
@@ -282,10 +285,10 @@ const api = {
       repoId?: number
     }): Promise<FeatureCommitResult[]> =>
       ipcRenderer.invoke(IPC.featuresCommitPublish, args),
-    publish: (featureId: number): Promise<FeatureCommitResult[]> =>
-      ipcRenderer.invoke(IPC.featuresPublish, featureId),
-    pull: (featureId: number): Promise<FeatureCommitResult[]> =>
-      ipcRenderer.invoke(IPC.featuresPull, featureId),
+    publish: (args: number | { featureId: number; repoId?: number }): Promise<FeatureCommitResult[]> =>
+      ipcRenderer.invoke(IPC.featuresPublish, args),
+    pull: (args: number | { featureId: number; repoId?: number }): Promise<FeatureCommitResult[]> =>
+      ipcRenderer.invoke(IPC.featuresPull, args),
     rebranchRepo: (args: {
       featureId: number
       repoId: number

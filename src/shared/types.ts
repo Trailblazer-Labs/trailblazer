@@ -227,6 +227,20 @@ export interface PRCreateResult {
   reason?: string
 }
 
+export interface PRPreviewRepo {
+  repoId: number
+  repoName: string
+  branch: string
+  baseBranch: string
+  commitsAhead: number
+  filesChanged: number
+  hasUncommitted: boolean
+  eligible: boolean
+  reason?: string
+  existingPrNumber?: number
+  existingPrUrl?: string
+}
+
 export interface Issue {
   id: number
   repoId: number
