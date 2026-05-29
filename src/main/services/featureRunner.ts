@@ -494,9 +494,19 @@ export async function commitFeatureChanges(
         out.push({ repoId: r.repoId, repoName: r.repoName, status: 'clean' })
         continue
       }
+      const generated = message.trim()
+        ? null
+        : await generateCommitMessage({
+            projectId: feature.projectId,
+            worktreePath: r.worktreePath,
+            baseBranch: r.baseBranch,
+            featureName: feature.name,
+            repoName: r.repoName
+          }).catch(() => null)
+      const repoMsg = message.trim() || generated || msg
       const fileCount = status.files.length
       await git.add(['-A'])
-      const commit = await git.commit(msg)
+      const commit = await git.commit(repoMsg)
       out.push({
         repoId: r.repoId,
         repoName: r.repoName,
@@ -534,9 +544,19 @@ export async function commitAndPublishFeatureChanges(
       let filesCommitted: number | undefined
       let sha: string | undefined
       if (!status.isClean()) {
+        const generated = message.trim()
+          ? null
+          : await generateCommitMessage({
+              projectId: feature.projectId,
+              worktreePath: r.worktreePath,
+              baseBranch: r.baseBranch,
+              featureName: feature.name,
+              repoName: r.repoName
+            }).catch(() => null)
+        const repoMsg = message.trim() || generated || msg
         filesCommitted = status.files.length
         await git.add(['-A'])
-        const commit = await git.commit(msg)
+        const commit = await git.commit(repoMsg)
         sha = commit.commit
       }
       await pushBranch(r.worktreePath, r.branch)
@@ -673,8 +693,15 @@ export async function createPRs(featureId: number): Promise<
       // Auto-commit any uncommitted changes so they make it into the PR.
       const status = await git.status()
       if (!status.isClean()) {
+        const generatedCommit = await generateCommitMessage({
+          projectId: feature.projectId,
+          worktreePath: r.worktreePath,
+          baseBranch: r.baseBranch,
+          featureName: feature.name,
+          repoName: r.repoName
+        }).catch(() => null)
         await git.add(['-A'])
-        await git.commit(`WIP: ${feature.name}`)
+        await git.commit(generatedCommit || `chore: ${feature.name}`)
       }
 
       // Make sure origin/<baseBranch> is up to date locally — without this the
@@ -1039,6 +1066,106 @@ function humanizeFeatureName(s: string): string {
   return s.charAt(0).toUpperCase() + s.slice(1)
 }
 
+async function generateCommitMessage(args: {
+  projectId: number
+  worktreePath: string
+  baseBranch: string
+  featureName: string
+  repoName: string
+}): Promise<string | null> {
+  const summary = await summarizeBranchChanges(args.worktreePath, args.baseBranch)
+  if (!summary.commitLines && !summary.filesBlock && !summary.workingFilesBlock) return null
+  const { engine, model } = resolveProjectAgent(args.projectId, 'feature')
+  const prompt = [
+    `Write one git commit message subject for the current repository changes.`,
+    ``,
+    `Repository: ${args.repoName}`,
+    `Feature: ${args.featureName}`,
+    `Base branch: ${args.baseBranch}`,
+    ``,
+    `Committed changes already on this branch:`,
+    summary.commitLines || '(none)',
+    ``,
+    `Branch diff files against origin/${args.baseBranch}:`,
+    summary.filesBlock || '(none)',
+    ``,
+    `Uncommitted working tree files that will be included in this commit:`,
+    summary.workingFilesBlock || '(none)',
+    ``,
+    `Return ONLY the commit subject line. No prose, no markdown, no quotes.`,
+    `Use an imperative, specific subject under 72 characters.`
+  ].join('\n')
+  const { done, getStdout } = spawnAgent(engine, prompt, 'read', args.worktreePath, undefined, {
+    model
+  })
+  const code = await done
+  if (code !== 0) return null
+  const text = engine === 'claude' ? extractClaudeFinal(getStdout()) : extractCodexFinal(getStdout())
+  return cleanCommitSubject(text)
+}
+
+async function summarizeBranchChanges(
+  worktreePath: string,
+  baseBranch: string
+): Promise<{ commitLines: string; filesBlock: string; workingFilesBlock: string }> {
+  const git = simpleGit(worktreePath)
+  const base = `origin/${baseBranch}`
+  await git.fetch('origin', baseBranch).catch(() => {})
+
+  let commitLines = ''
+  try {
+    const log = await git.log({ from: base, to: 'HEAD' })
+    commitLines = log.all
+      .slice(0, 30)
+      .map((c) => `- ${c.message.split('\n')[0]}`)
+      .join('\n')
+  } catch (e) {
+    // eslint-disable-next-line no-console
+    console.warn('[change-summary] git log failed:', e)
+  }
+
+  let filesBlock = ''
+  try {
+    const summary = await git.diffSummary([`${base}...HEAD`])
+    filesBlock = summary.files
+      .slice(0, 80)
+      .map((f) => {
+        const ins = (f as { insertions?: number }).insertions ?? 0
+        const dels = (f as { deletions?: number }).deletions ?? 0
+        return `- ${f.file} (+${ins} -${dels})`
+      })
+      .join('\n')
+  } catch (e) {
+    // eslint-disable-next-line no-console
+    console.warn('[change-summary] git diffSummary failed:', e)
+  }
+
+  let workingFilesBlock = ''
+  try {
+    const status = await git.status()
+    workingFilesBlock = status.files
+      .slice(0, 80)
+      .map((f) => `- ${f.path} (${[f.index, f.working_dir].filter(Boolean).join('').trim() || 'modified'})`)
+      .join('\n')
+  } catch {
+    // ignore
+  }
+
+  return { commitLines, filesBlock, workingFilesBlock }
+}
+
+function cleanCommitSubject(value: string): string | null {
+  const line = value
+    .replace(/^```(?:text)?\s*/i, '')
+    .replace(/```\s*$/i, '')
+    .trim()
+    .split('\n')
+    .map((part) => part.trim().replace(/^["'`]|["'`]$/g, ''))
+    .find(Boolean)
+  if (!line) return null
+  return line.length > 72 ? line.slice(0, 69).trimEnd() + '...' : line
+}
+
 /**
  * Spawn the configured engine in read-only mode in the worktree and ask it to summarize
  * the branch's changes as a PR title + markdown body. Returns null on any failure so the
@@ -1052,44 +1179,15 @@ async function generatePRMessage(args: {
   repoName: string
 }): Promise<{ title: string; body: string } | null> {
   const { engine, model } = resolveProjectAgent(args.projectId, 'issueResolve')
-
-  const git = simpleGit(args.worktreePath)
-  // Gather commit subjects ahead of base.
-  let commitLines = ''
-  try {
-    const log = await git.log({ from: `origin/${args.baseBranch}`, to: 'HEAD' })
-    commitLines = log.all
-      .slice(0, 30)
-      .map((c) => `- ${c.message.split('\n')[0]}`)
-      .join('\n')
-  } catch (e) {
-    // eslint-disable-next-line no-console
-    console.warn('[pr-message] git log failed:', e)
-  }
-  // Gather file list with adds/dels.
-  let filesBlock = ''
-  try {
-    const summary = await git.diffSummary([`origin/${args.baseBranch}...HEAD`])
-    filesBlock = summary.files
-      .slice(0, 60)
-      .map((f) => {
-        const ins = (f as { insertions?: number }).insertions ?? 0
-        const dels = (f as { deletions?: number }).deletions ?? 0
-        return `- ${f.file}  (+${ins} -${dels})`
-      })
-      .join('\n')
-  } catch (e) {
-    // eslint-disable-next-line no-console
-    console.warn('[pr-message] git diffSummary failed:', e)
-  }
-  if (!commitLines && !filesBlock) {
+  const summary = await summarizeBranchChanges(args.worktreePath, args.baseBranch)
+  if (!summary.commitLines && !summary.filesBlock && !summary.workingFilesBlock) {
     // eslint-disable-next-line no-console
     console.warn('[pr-message] skipped: no commits or files to summarize')
     return null
   }
   // eslint-disable-next-line no-console
   console.log(
-    `[pr-message] generating for ${args.repoName} (${commitLines.split('\n').filter(Boolean).length} commits, ${filesBlock.split('\n').filter(Boolean).length} files) via ${engine}`
+    `[pr-message] generating for ${args.repoName} (${summary.commitLines.split('\n').filter(Boolean).length} commits, ${summary.filesBlock.split('\n').filter(Boolean).length} files) via ${engine}`
   )
 
   const prompt = [
@@ -1102,10 +1200,13 @@ async function generatePRMessage(args: {
     AGENT_INSTRUCTIONS_FILE_PROMPT,
     ``,
     `Commits on this branch:`,
-    commitLines || '(none)',
+    summary.commitLines || '(none)',
     ``,
-    `Files changed:`,
-    filesBlock || '(none)',
+    `Committed branch diff files:`,
+    summary.filesBlock || '(none)',
+    ``,
+    `Uncommitted working tree files that will be included before opening the PR:`,
+    summary.workingFilesBlock || '(none)',
     ``,
     `Return ONLY a single-line JSON object, no prose, no code fences:`,
     `{"title": "<concise imperative title, under 80 chars>", "body": "<markdown body>"}`,

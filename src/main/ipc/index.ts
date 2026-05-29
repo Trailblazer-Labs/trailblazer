@@ -22,6 +22,7 @@ import type { ModelUseCase } from '@shared/models'
 import * as features from '../services/features'
 import * as featureRunner from '../services/featureRunner'
 import * as featureDevRunner from '../services/featureDevRunner'
+import * as featureTerminal from '../services/featureTerminal'
 import * as devProfiles from '../services/devProfiles'
 import * as plans from '../services/plans'
 import * as planningRunner from '../services/planningRunner'
@@ -76,6 +77,9 @@ export function registerIpc(win: BrowserWindow) {
   })
   featureDevRunner.featureDevBus.on('event', (evt) => {
     if (!win.isDestroyed()) win.webContents.send(IPC.featuresDevEvent, evt)
+  })
+  featureTerminal.featureTerminalBus.on('event', (evt) => {
+    if (!win.isDestroyed()) win.webContents.send(IPC.featuresTerminalEvent, evt)
   })
   planningRunner.planBus.on('event', (evt) => {
     if (!win.isDestroyed()) win.webContents.send(IPC.plansEvent, evt)
@@ -447,6 +451,21 @@ export function registerIpc(win: BrowserWindow) {
       }
     ) => features.importFeature(args)
   )
+  ipcMain.handle(
+    IPC.featuresAddRepos,
+    (
+      _e,
+      args: {
+        featureId: number
+        repos: Array<{
+          repoId: number
+          existingBranch?: string
+          newBranch?: string
+          baseBranch?: string
+        }>
+      }
+    ) => features.addReposToFeature(args)
+  )
   ipcMain.handle(IPC.featuresDelete, (_e, featureId: number) => features.deleteFeature(featureId))
   ipcMain.handle(
     IPC.featuresRebranchRepo,
@@ -552,6 +571,24 @@ export function registerIpc(win: BrowserWindow) {
   )
   ipcMain.handle(IPC.featuresDevStop, (_e, featureId: number) =>
     featureDevRunner.stopDevCommand(featureId)
+  )
+  ipcMain.handle(
+    IPC.featuresTerminalStart,
+    (_e, args: { featureId: number; cols?: number; rows?: number; cliSessionId?: string }) =>
+      featureTerminal.startFeatureTerminal(args)
+  )
+  ipcMain.handle(
+    IPC.featuresTerminalWrite,
+    (_e, args: { featureId: number; data: string }) =>
+      featureTerminal.writeFeatureTerminal(args)
+  )
+  ipcMain.handle(
+    IPC.featuresTerminalResize,
+    (_e, args: { featureId: number; cols: number; rows: number }) =>
+      featureTerminal.resizeFeatureTerminal(args)
+  )
+  ipcMain.handle(IPC.featuresTerminalStop, (_e, featureId: number) =>
+    featureTerminal.stopFeatureTerminal(featureId)
   )
   ipcMain.handle(IPC.reposSetWorkingBranch, (_e, repoId: number, branch: string | null) => {
     getDb().prepare('UPDATE repos SET working_branch = ? WHERE id = ?').run(branch, repoId)

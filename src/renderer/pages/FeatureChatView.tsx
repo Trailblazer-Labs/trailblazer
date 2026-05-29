@@ -8,9 +8,11 @@ import { filesFromClipboard, filesFromDrop, filesToPromptAttachments } from '../
 import PRResultsModal from '../components/PRResultsModal'
 import FeatureSwitcher, { useFeatureSwitcherCollapsed } from '../components/FeatureSwitcher'
 import FeatureChangesPanel from '../components/FeatureChangesPanel'
+import NewFeatureModal from '../components/NewFeatureModal'
+import FeatureTerminal from '../components/FeatureTerminal'
 import { cn } from '../lib/cn'
 import { buildResumeCommand } from '../lib/resumeCommand'
-import { Clipboard, Paperclip, X } from 'lucide-react'
+import { Clipboard, MoreHorizontal, Paperclip, X } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { defaultModelFor, mergedModels } from '@shared/models'
@@ -82,6 +84,9 @@ export default function FeatureChatView({
   const [error, setError] = useState<string | null>(null)
   const [prResults, setPrResults] = useState<PRCreateResult[] | null>(null)
   const [creatingPRs, setCreatingPRs] = useState(false)
+  const [addingRepos, setAddingRepos] = useState(false)
+  const [featureMenuOpen, setFeatureMenuOpen] = useState(false)
+  const [featureMode, setFeatureMode] = useState<'chat' | 'terminal'>('terminal')
 
   useEffect(() => {
     if (initialDraft) setDraft(initialDraft)
@@ -96,7 +101,7 @@ export default function FeatureChatView({
     queryFn: () => window.api.features.listRepos(featureId)
   })
   // Sessions: pick the active session — explicit > most-recent > auto-create.
-  const { data: sessions = [] } = useQuery<FeatureSession[]>({
+  const { data: sessions = [], status: sessionsStatus } = useQuery<FeatureSession[]>({
     queryKey: ['feature-sessions', featureId],
     queryFn: () => window.api.features.listSessions(featureId)
   })
@@ -269,6 +274,17 @@ export default function FeatureChatView({
     }
   }
 
+  useEffect(() => {
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key.toLowerCase() !== 'r' || (!event.metaKey && !event.ctrlKey)) return
+      event.preventDefault()
+      if (creatingPRs) return
+      void createPRs()
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [creatingPRs])
+
   async function copyResumeCommand() {
     if (!feature) return
     await navigator.clipboard.writeText(
@@ -333,7 +349,7 @@ export default function FeatureChatView({
             <span className="text-muted/40 shrink-0">/</span>
             <h1 className="font-brand text-base truncate">{feature?.name ?? '…'}</h1>
             {feature?.slug && (
-              <span className="text-[10px] text-muted font-mono shrink-0">
+              <span className="hidden xl:inline text-[10px] text-muted font-mono shrink-0">
                 feature/{feature.slug}
               </span>
             )}
@@ -346,17 +362,16 @@ export default function FeatureChatView({
               </>
             )}
           </div>
-          <div className="hidden md:flex flex-1 items-center justify-center">
-            <FeatureProjectTabs
-              planningWorking={activePlanIds.length > 0}
-              issuesWorking={issueRunVisible}
-              featuresWorking={activeFeatureIds.length > 0}
-              onFeatures={() => setView({ kind: 'project', projectId, tab: 'features' })}
-              onPlanning={() => setView({ kind: 'project', projectId, tab: 'planning' })}
-              onIssues={() => setView({ kind: 'project', projectId, tab: 'issues' })}
-            />
-          </div>
-          <div className="flex flex-1 items-center justify-end gap-2">
+          <FeatureProjectTabs
+            compact
+            planningWorking={activePlanIds.length > 0}
+            issuesWorking={issueRunVisible}
+            featuresWorking={activeFeatureIds.length > 0}
+            onFeatures={() => setView({ kind: 'project', projectId, tab: 'features' })}
+            onPlanning={() => setView({ kind: 'project', projectId, tab: 'planning' })}
+            onIssues={() => setView({ kind: 'project', projectId, tab: 'issues' })}
+          />
+          <div className="flex items-center justify-end gap-2 shrink-0">
             <button
               onClick={() => void copyResumeCommand()}
               disabled={!feature}
@@ -375,24 +390,66 @@ export default function FeatureChatView({
                   : 'Copy terminal command'}
               </span>
             </button>
-            <Button
-              onClick={async () => {
-                const s = await window.api.features.createSession(featureId)
-                void qc.invalidateQueries({ queryKey: ['feature-sessions', featureId] })
-                setView({ kind: 'feature', projectId, featureId, sessionId: s.id })
-              }}
-            >
-              + New session
-            </Button>
+            <div className="relative">
+              <button
+                onClick={() => setFeatureMenuOpen((open) => !open)}
+                title="Feature actions"
+                aria-label="Feature actions"
+                className="no-drag h-8 w-8 rounded-md border border-border bg-panel text-muted hover:text-text hover:bg-[#1d1d1d] flex items-center justify-center"
+              >
+                <MoreHorizontal size={15} />
+              </button>
+              {featureMenuOpen && (
+                <div className="absolute right-0 top-9 z-30 w-44 rounded-md border border-border bg-[#171717] p-1 shadow-xl">
+                  <button
+                    onClick={async () => {
+                      setFeatureMenuOpen(false)
+                      const s = await window.api.features.createSession(featureId)
+                      void qc.invalidateQueries({ queryKey: ['feature-sessions', featureId] })
+                      setView({ kind: 'feature', projectId, featureId, sessionId: s.id })
+                    }}
+                    className="no-drag w-full rounded px-2 py-1.5 text-left text-xs text-muted hover:bg-panel hover:text-text"
+                  >
+                    New session
+                  </button>
+                  <button
+                    onClick={() => {
+                      setFeatureMenuOpen(false)
+                      setAddingRepos(true)
+                    }}
+                    className="no-drag w-full rounded px-2 py-1.5 text-left text-xs text-muted hover:bg-panel hover:text-text"
+                  >
+                    Add repositories
+                  </button>
+                </div>
+              )}
+            </div>
             <Button variant="primary" disabled={creatingPRs} onClick={createPRs}>
-              {creatingPRs ? 'Opening PRs…' : 'Create PRs'}
+              {creatingPRs ? 'Opening PRs...' : 'Create PRs'}
             </Button>
           </div>
         </header>
 
         <div className="flex-1 min-h-0 overflow-hidden flex">
-       <div className="flex-1 min-w-0 flex flex-col">
-        <div ref={threadRef} className="flex-1 overflow-auto px-8 py-6 space-y-5">
+          <div className="flex-1 min-w-0 flex flex-col">
+            <div className="shrink-0 border-b border-border/60 px-4 py-2 flex items-center gap-3">
+              <div className="inline-flex rounded-md border border-border bg-bg p-0.5">
+                <ModeButton active={featureMode === 'chat'} onClick={() => setFeatureMode('chat')}>
+                  Chat
+                </ModeButton>
+                <ModeButton
+                  active={featureMode === 'terminal'}
+                  onClick={() => setFeatureMode('terminal')}
+                >
+                  Terminal
+                </ModeButton>
+              </div>
+            </div>
+            {featureMode === 'terminal' && sessionsStatus !== 'pending' ? (
+              <FeatureTerminal featureId={featureId} feature={feature} session={currentSession} />
+            ) : (
+              <>
+                <div ref={threadRef} className="flex-1 overflow-auto px-8 py-6 space-y-5">
           {messages.length === 0 && !agentRunning && (
             <div className="max-w-2xl mx-auto text-center text-sm text-muted py-12">
               Start by describing what you want this feature to do. The agent will work across the
@@ -440,9 +497,9 @@ export default function FeatureChatView({
             </div>
           )}
           {error && <div className="max-w-3xl mx-auto text-red-400 text-xs">{error}</div>}
-        </div>
+                </div>
 
-        <div className="border-t border-border p-3">
+                <div className="border-t border-border p-3">
           <div className="max-w-3xl mx-auto">
             <div
               className="rounded-lg border border-border bg-panel focus-within:border-accent transition-colors"
@@ -550,15 +607,32 @@ export default function FeatureChatView({
               </div>
             </div>
           </div>
+                </div>
+              </>
+            )}
+          </div>
+          <aside className="w-[360px] border-l border-border shrink-0 hidden lg:flex flex-col">
+            <FeatureChangesPanel featureId={featureId} sessionId={resolvedSessionId} />
+          </aside>
         </div>
-       </div>
-       <aside className="w-[360px] border-l border-border shrink-0 hidden lg:flex flex-col">
-         <FeatureChangesPanel featureId={featureId} sessionId={resolvedSessionId} />
-       </aside>
-      </div>
       </div>
 
       {prResults && <PRResultsModal results={prResults} onClose={() => setPrResults(null)} />}
+      {addingRepos && feature && (
+        <NewFeatureModal
+          projectId={projectId}
+          repos={projectRepos}
+          feature={feature}
+          existingRepoIds={featureRepos.map((repo) => repo.repoId)}
+          onClose={() => setAddingRepos(false)}
+          onCreated={() => {
+            setAddingRepos(false)
+            void qc.invalidateQueries({ queryKey: ['feature-repos', featureId] })
+            void qc.invalidateQueries({ queryKey: ['feature-changes', featureId] })
+            void qc.invalidateQueries({ queryKey: ['features', projectId] })
+          }}
+        />
+      )}
     </div>
   )
 }
@@ -634,7 +708,32 @@ function ChatModelPicker({
   )
 }
 
+function ModeButton({
+  active,
+  onClick,
+  children
+}: {
+  active: boolean
+  onClick: () => void
+  children: React.ReactNode
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={cn(
+        'no-drag h-6 rounded px-2 text-[11px] font-medium transition-colors',
+        active
+          ? 'bg-panel text-text shadow-sm shadow-black/20'
+          : 'text-muted hover:bg-white/[0.04] hover:text-text'
+      )}
+    >
+      {children}
+    </button>
+  )
+}
+
 function FeatureProjectTabs({
+  compact,
   featuresWorking,
   planningWorking,
   issuesWorking,
@@ -642,6 +741,7 @@ function FeatureProjectTabs({
   onPlanning,
   onIssues
 }: {
+  compact?: boolean
   featuresWorking: boolean
   planningWorking: boolean
   issuesWorking: boolean
@@ -650,14 +750,19 @@ function FeatureProjectTabs({
   onIssues: () => void
 }) {
   return (
-    <div className="inline-flex items-center gap-1 rounded-full border border-border/60 bg-panel/40 p-1 shadow-inner shadow-black/10">
-      <FeatureProjectTab active working={featuresWorking} onClick={onFeatures}>
+    <div
+      className={cn(
+        'inline-flex items-center gap-1 rounded-full border border-border/60 bg-panel/40 p-1 shadow-inner shadow-black/10',
+        compact && 'hidden sm:inline-flex'
+      )}
+    >
+      <FeatureProjectTab active compact={compact} working={featuresWorking} onClick={onFeatures}>
         Features
       </FeatureProjectTab>
-      <FeatureProjectTab working={planningWorking} onClick={onPlanning}>
+      <FeatureProjectTab compact={compact} working={planningWorking} onClick={onPlanning}>
         Planning
       </FeatureProjectTab>
-      <FeatureProjectTab working={issuesWorking} onClick={onIssues}>
+      <FeatureProjectTab compact={compact} working={issuesWorking} onClick={onIssues}>
         Issues
       </FeatureProjectTab>
     </div>
@@ -666,11 +771,13 @@ function FeatureProjectTabs({
 
 function FeatureProjectTab({
   active,
+  compact,
   working,
   onClick,
   children
 }: {
   active?: boolean
+  compact?: boolean
   working?: boolean
   onClick: () => void
   children: React.ReactNode
@@ -679,7 +786,10 @@ function FeatureProjectTab({
     <button
       onClick={onClick}
       className={cn(
-        'relative h-8 px-5 text-sm font-medium rounded-full transition-all min-w-[112px]',
+        'relative font-medium rounded-full transition-all',
+        compact
+          ? 'h-6 min-w-[74px] px-3 text-[11px]'
+          : 'h-8 min-w-[112px] px-5 text-sm',
         active
           ? 'bg-[#24201d] text-text shadow-sm shadow-black/20 ring-1 ring-white/5'
           : 'text-muted hover:text-text hover:bg-white/[0.03]'
