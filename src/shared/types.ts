@@ -152,6 +152,34 @@ export type FeatureDevCommandEvent =
       message: string
     }
 
+export type FeatureTerminalEvent =
+  | {
+      type: 'start'
+      featureId: number
+      terminalId: string
+      engine: Engine
+      cwd: string
+      command: string
+    }
+  | {
+      type: 'output'
+      featureId: number
+      terminalId: string
+      data: string
+    }
+  | {
+      type: 'exit'
+      featureId: number
+      terminalId: string
+      code: number | null
+    }
+  | {
+      type: 'error'
+      featureId: number
+      terminalId: string
+      message: string
+    }
+
 export interface DevProfile {
   id: number
   projectId: number

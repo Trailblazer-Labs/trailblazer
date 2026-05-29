@@ -83,6 +83,23 @@ export default function FeatureChangesPanel({
     void qc.invalidateQueries({ queryKey: ['feature-changes', featureId] })
   }
 
+  const terminalRefreshTimer = useRef<number | null>(null)
+  useEffect(() => {
+    const unsub = window.api.features.onTerminalEvent((evt) => {
+      if (evt.featureId !== featureId) return
+      if (evt.type !== 'output') return
+      if (terminalRefreshTimer.current) return
+      terminalRefreshTimer.current = window.setTimeout(() => {
+        terminalRefreshTimer.current = null
+        void qc.invalidateQueries({ queryKey: ['feature-changes', featureId] })
+      }, 1500)
+    })
+    return () => {
+      unsub()
+      if (terminalRefreshTimer.current) window.clearTimeout(terminalRefreshTimer.current)
+    }
+  }, [featureId, qc])
+
   const hasUncommitted = changes.some((r) => r.hasUncommitted)
   const hasPendingCommits = changes.some((r) => r.commitsAhead > 0)
 
@@ -372,13 +389,13 @@ export default function FeatureChangesPanel({
                     }
                     className="min-w-0 flex flex-1 items-center gap-2 text-left"
                   >
-                    <span className={cn('text-muted text-[10px] transition-transform', open && 'rotate-90')}>
+                    <span className={cn('text-muted text-[10px] transition-transform shrink-0', open && 'rotate-90')}>
                       ▶
                     </span>
-                    <span className="text-xs flex-1 truncate">{repo.repoName}</span>
-                    <span className="hidden xl:inline text-[10px] text-muted truncate">
-                      {repo.branch} · base {repo.baseBranch}
-                    </span>
+                    <div className="min-w-0 flex-1">
+                      <div className="text-xs truncate">{repo.repoName}</div>
+                      <div className="text-[10px] text-muted truncate">{repo.branch}</div>
+                    </div>
                     {repo.commitsAhead > 0 && (
                       <span className="text-[10px] text-accent tabular-nums">
                         {repo.prNumber

@@ -16,6 +16,7 @@ import type {
   FeatureCommitResult,
   FeatureRepoChanges,
   FeatureDevCommandEvent,
+  FeatureTerminalEvent,
   FeatureRunEvent,
   FeatureSession,
   GhAuthEvent,
@@ -323,6 +324,28 @@ const api = {
     }): Promise<DevSetupState> => ipcRenderer.invoke(IPC.featuresDevSetupState, args),
     stopDevCommand: (featureId: number): Promise<{ ok: true }> =>
       ipcRenderer.invoke(IPC.featuresDevStop, featureId),
+    startTerminal: (args: {
+      featureId: number
+      cols?: number
+      rows?: number
+      cliSessionId?: string
+    }): Promise<{ terminalId: string }> =>
+      ipcRenderer.invoke(IPC.featuresTerminalStart, args),
+    writeTerminal: (args: { featureId: number; data: string }): Promise<{ ok: true }> =>
+      ipcRenderer.invoke(IPC.featuresTerminalWrite, args),
+    resizeTerminal: (args: {
+      featureId: number
+      cols: number
+      rows: number
+    }): Promise<{ ok: true }> =>
+      ipcRenderer.invoke(IPC.featuresTerminalResize, args),
+    stopTerminal: (featureId: number): Promise<{ ok: true }> =>
+      ipcRenderer.invoke(IPC.featuresTerminalStop, featureId),
+    onTerminalEvent: (cb: (evt: FeatureTerminalEvent) => void) => {
+      const listener = (_e: IpcRendererEvent, evt: FeatureTerminalEvent) => cb(evt)
+      ipcRenderer.on(IPC.featuresTerminalEvent, listener)
+      return () => { ipcRenderer.off(IPC.featuresTerminalEvent, listener) }
+    },
     onDevEvent: (cb: (evt: FeatureDevCommandEvent) => void) => {
       const listener = (_e: IpcRendererEvent, evt: FeatureDevCommandEvent) => cb(evt)
       ipcRenderer.on(IPC.featuresDevEvent, listener)
